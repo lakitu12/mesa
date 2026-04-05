@@ -460,7 +460,7 @@ lp_build_fill_mattrs(std::vector<std::string> &MAttrs)
 #if DETECT_ARCH_AARCH64 && defined(HAVE_SYS_AUXV)
    // Guess SVE/SVE2 support on ARM64
    bool has_sve  = getauxval(AT_HWCAP)  & HWCAP_SVE;
-   bool has_sve2 = getauxval(AT_HWCAP2) & HWCAP2_SVE2
+   bool has_sve2 = getauxval(AT_HWCAP2) & HWCAP2_SVE2;
    has_sve  = false;
    has_sve2  = false;
    MAttrs.push_back(has_sve  ? "+sve"  : "-sve");
