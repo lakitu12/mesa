@@ -17,7 +17,7 @@ permissions:
   contents: write
 
 jobs:
-  debian-trixie:
+  debian-testing:
     runs-on: ubuntu-24.04-arm
     container:
       image: debian:testing-slim
@@ -63,7 +63,7 @@ jobs:
       - name: Set release name suffix
         shell: bash
         run: |
-          cd ~/mesa-for-android-container
+          cd ~/mesa
           version=$(grep -v '^[[:space:]]*$' VERSION | head -n1)
           build_date=$(TZ=Asia/Shanghai date +%Y%m%d)
           echo "MESA_RELEASE_NAME_SUFFIX=${version}-${build_date}_debian_trixie_arm64" >> "$GITHUB_ENV"
