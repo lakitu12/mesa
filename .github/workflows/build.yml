@@ -24,17 +24,18 @@ jobs:
       options: --privileged --user root
 
     steps:
-      - name: Update root certificates
-        run: |
-              sudo apt-get update
-              sudo apt-get install -y ca-certificates
-              sudo update-ca-certificates
-      -       name: Install dependencies
+      - name: Install dependencies
         run: |
           sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/debian.sources
           apt update
           apt build-dep -y mesa
           apt install -y git ccache libxfixes-dev libarchive-dev
+          
+      - name: Update root certificates
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ca-certificates
+          sudo update-ca-certificates
 
       - name: Cache ccache
         uses: actions/cache@v4
