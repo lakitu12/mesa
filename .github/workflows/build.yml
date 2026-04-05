@@ -33,9 +33,9 @@ jobs:
           
       - name: Update root certificates
         run: |
-          sudo apt-get update
-          sudo apt-get install -y ca-certificates
-          sudo update-ca-certificates
+          apt update
+          apt install -y ca-certificates
+          update-ca-certificates
 
       - name: Cache ccache
         uses: actions/cache@v4
