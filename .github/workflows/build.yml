@@ -73,7 +73,7 @@ jobs:
         run: |
           export CCACHE_DIR=/root/.ccache
           echo "Building Mesa..."
-          cd ~/mesa-for-android-container
+          cd ~/mesa
           meson setup build/ \
                   --prefix=/usr \
                   -Dgbm=enabled \
