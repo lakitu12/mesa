@@ -116,8 +116,8 @@ jobs:
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: mesa-for-android-container_${{ env.MESA_RELEASE_NAME_SUFFIX }}
+          name: mesa_${{ env.MESA_RELEASE_NAME_SUFFIX }}
           path: |
-            ~/mesa-for-android-container/*.tar.gz
-            ~/mesa-for-android-container/sha256sums.txt
+            ~/mesa/*.tar.gz
+            ~/mesa/sha256sums.txt
           retention-days: 90
