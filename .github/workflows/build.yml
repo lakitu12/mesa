@@ -20,7 +20,7 @@ jobs:
   debian-trixie:
     runs-on: ubuntu-24.04-arm
     container:
-      image: debian:trixie-slim
+      image: debian:testing-slim
       options: --privileged --user root
 
     steps:
