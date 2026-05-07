@@ -21,7 +21,11 @@
  * IN THE SOFTWARE.
  */
 
-#include "v3dv_private.h"
+#include "v3dv_device.h"
+#include "v3dv_cmd_buffer.h"
+#include "v3dv_image.h"
+#include "v3dv_version_dispatch.h"
+#include "vk_format.h"
 #include "v3dv_format_table.h"
 #include "v3dvx_format_table.h"
 #include "v3dv_meta_common.h"
@@ -65,12 +69,6 @@ emit_rcl_prologue(struct v3dv_job *job,
 #if V3D_VERSION >= 71
       config.log2_tile_width = log2_tile_size(tiling->tile_width);
       config.log2_tile_height = log2_tile_size(tiling->tile_height);
-      /* FIXME: ideallly we would like next assert on the packet header (as is
-       * general, so also applies to GL). We would need to expand
-       * gen_pack_header for that.
-       */
-      assert(config.log2_tile_width == config.log2_tile_height ||
-             config.log2_tile_width == config.log2_tile_height + 1);
 #endif
       config.internal_depth_type = fb->internal_depth_type;
    }
@@ -180,7 +178,7 @@ emit_rcl_prologue(struct v3dv_job *job,
    cl_emit(rcl, TILE_LIST_INITIAL_BLOCK_SIZE, init) {
       init.use_auto_chained_tile_lists = true;
       init.size_of_first_block_in_chained_tile_lists =
-         TILE_ALLOCATION_BLOCK_SIZE_64B;
+         V3D_TILE_ALLOC_INITIAL_BLOCK_SIZE_ENUM;
    }
 
    return rcl;
@@ -198,7 +196,8 @@ emit_frame_setup(struct v3dv_job *job,
    struct v3dv_cl *rcl = &job->rcl;
 
    const uint32_t tile_alloc_offset =
-      64 * min_layer * tiling->draw_tiles_x * tiling->draw_tiles_y;
+      V3D_TILE_ALLOC_INITIAL_BLOCK_SIZE *
+      min_layer * tiling->draw_tiles_x * tiling->draw_tiles_y;
    cl_emit(rcl, MULTICORE_RENDERING_TILE_LIST_SET_BASE, list) {
       list.address = v3dv_cl_address(job->tile_alloc, tile_alloc_offset);
    }
@@ -1411,15 +1410,16 @@ v3dX(meta_copy_buffer)(struct v3dv_cmd_buffer *cmd_buffer,
       uint32_t width, height;
       framebuffer_size_for_pixel_count(num_items, &width, &height);
 
-      v3dv_job_start_frame(job, width, height, 1, true, true, 1,
-                           internal_bpp, 4 * v3d_internal_bpp_words(internal_bpp),
-                           false);
+      v3dv_job_start_frame(job, width, height, 1, true, 1, internal_bpp,
+                           4 * v3d_internal_bpp_words(internal_bpp), false);
 
       struct v3dv_meta_framebuffer framebuffer;
       v3dX(meta_framebuffer_init)(&framebuffer, vk_format, internal_type,
                                   &job->frame_tiling);
 
       v3dX(job_emit_binning_flush)(job);
+      if (!v3dv_job_allocate_tile_state(job))
+         return NULL;
 
       v3dX(meta_emit_copy_buffer_rcl)(job, dst, src, dst_offset, src_offset,
                                       &framebuffer, format, item_size);
@@ -1459,15 +1459,16 @@ v3dX(meta_fill_buffer)(struct v3dv_cmd_buffer *cmd_buffer,
       uint32_t width, height;
       framebuffer_size_for_pixel_count(num_items, &width, &height);
 
-      v3dv_job_start_frame(job, width, height, 1, true, true, 1,
-                           internal_bpp, 4 * v3d_internal_bpp_words(internal_bpp),
-                           false);
+      v3dv_job_start_frame(job, width, height, 1, true, 1, internal_bpp,
+                           4 * v3d_internal_bpp_words(internal_bpp), false);
 
       struct v3dv_meta_framebuffer framebuffer;
       v3dX(meta_framebuffer_init)(&framebuffer, VK_FORMAT_R8G8B8A8_UINT,
                                   internal_type, &job->frame_tiling);
 
       v3dX(job_emit_binning_flush)(job);
+      if (!v3dv_job_allocate_tile_state(job))
+         return;
 
       v3dX(meta_emit_fill_buffer_rcl)(job, bo, offset, &framebuffer, data);
 

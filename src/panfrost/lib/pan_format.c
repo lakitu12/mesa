@@ -92,7 +92,9 @@ const struct pan_blendable_format
       BFMT_SRGB(R8G8B8A8, R8G8B8A8),
 
       BFMT2(A8_UNORM, R8G8B8A8, R8, 0),
+#if PAN_ARCH < 6
       BFMT2(I8_UNORM, R8G8B8A8, R8, 0),
+#endif
       BFMT2(R5G6B5_UNORM, R5G6B5A0, R5G6B5, 0),
       BFMT2(B5G6R5_UNORM, R5G6B5A0, R5G6B5, 0),
 
@@ -163,7 +165,7 @@ const struct pan_blendable_format
 #define FMTC(pipe, texfeat, interchange, swizzle, srgb)                        \
    [PIPE_FORMAT_##pipe] = {                                                    \
       .hw = MALI_PACK_FMT(texfeat, swizzle, srgb),                             \
-      .bind = (PAN_BIND_SAMPLER_VIEW | PAN_BIND_STORAGE_IMAGE),                \
+      .bind = (PAN_BIND_SAMPLER_VIEW),                                         \
       .texfeat_bit = MALI_##texfeat,                                           \
    }
 #else
@@ -173,7 +175,7 @@ const struct pan_blendable_format
 #define FMTC(pipe, texfeat, interchange, swizzle, srgb)                        \
    [PIPE_FORMAT_##pipe] = {                                                    \
       .hw = MALI_PACK_FMT(interchange, swizzle, srgb),                         \
-      .bind = (PAN_BIND_SAMPLER_VIEW | PAN_BIND_STORAGE_IMAGE),                \
+      .bind = (PAN_BIND_SAMPLER_VIEW),                                         \
       .texfeat_bit = MALI_##texfeat,                                           \
    }
 #endif
@@ -464,6 +466,9 @@ const struct pan_format GENX(pan_pipe_format)[PIPE_FORMAT_COUNT] = {
    FMT(A4R4G4B4_UNORM,          RGBA4_UNORM,     ARGB, L, VTR___),
    FMT(A4B4G4R4_UNORM,          RGBA4_UNORM,     ABGR, L, VTR___),
    FMT(R16G16B16A16_UNORM,      RGBA16_UNORM,    RGBA, L, VTR_IB),
+#if PAN_ARCH >= 11
+   FMT(X6R10X6G10X6B10X6A10_UNORM, R10X6G10X6B10X6A10X6_UNORM, RGBA, L, _T____),
+#endif
    FMT(B8G8R8A8_UNORM,          RGBA8_UNORM,     BGRA, L, VTR_IB),
    FMT(B8G8R8X8_UNORM,          RGBA8_UNORM,     BGR1, L, VTR_IB),
    FMT(A8R8G8B8_UNORM,          RGBA8_UNORM,     GBAR, L, VTR_IB),

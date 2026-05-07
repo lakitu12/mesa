@@ -142,6 +142,16 @@ wsi_headless_surface_get_capabilities2(VkIcdSurfaceBase *surface,
          break;
       }
 
+      case VK_STRUCTURE_TYPE_PRESENT_TIMING_SURFACE_CAPABILITIES_EXT: {
+         VkPresentTimingSurfaceCapabilitiesEXT *wait = (void *)ext;
+
+         wait->presentStageQueries = 0;
+         wait->presentTimingSupported = VK_FALSE;
+         wait->presentAtAbsoluteTimeSupported = VK_FALSE;
+         wait->presentAtRelativeTimeSupported = VK_FALSE;
+         break;
+      }
+
       default:
          /* Ignored */
          break;
@@ -168,6 +178,14 @@ wsi_headless_surface_get_formats(VkIcdSurfaceBase *icd_surface,
          out_fmt->format = VK_FORMAT_R8G8B8A8_UNORM;
          out_fmt->colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
       }
+      vk_outarray_append_typed(VkSurfaceFormatKHR, &out, out_fmt) {
+         out_fmt->format = VK_FORMAT_B8G8R8A8_SRGB;
+         out_fmt->colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+      }
+      vk_outarray_append_typed(VkSurfaceFormatKHR, &out, out_fmt) {
+         out_fmt->format = VK_FORMAT_R8G8B8A8_SRGB;
+         out_fmt->colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+      }
    } else {
       vk_outarray_append_typed(VkSurfaceFormatKHR, &out, out_fmt) {
          out_fmt->format = VK_FORMAT_R8G8B8A8_UNORM;
@@ -175,6 +193,14 @@ wsi_headless_surface_get_formats(VkIcdSurfaceBase *icd_surface,
       }
       vk_outarray_append_typed(VkSurfaceFormatKHR, &out, out_fmt) {
          out_fmt->format = VK_FORMAT_B8G8R8A8_UNORM;
+         out_fmt->colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+      }
+      vk_outarray_append_typed(VkSurfaceFormatKHR, &out, out_fmt) {
+         out_fmt->format = VK_FORMAT_R8G8B8A8_SRGB;
+         out_fmt->colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+      }
+      vk_outarray_append_typed(VkSurfaceFormatKHR, &out, out_fmt) {
+         out_fmt->format = VK_FORMAT_B8G8R8A8_SRGB;
          out_fmt->colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
       }
    }
@@ -200,6 +226,14 @@ wsi_headless_surface_get_formats2(VkIcdSurfaceBase *icd_surface,
          out_fmt->surfaceFormat.format = VK_FORMAT_R8G8B8A8_UNORM;
          out_fmt->surfaceFormat.colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
       }
+      vk_outarray_append_typed(VkSurfaceFormat2KHR, &out, out_fmt) {
+         out_fmt->surfaceFormat.format = VK_FORMAT_B8G8R8A8_SRGB;
+         out_fmt->surfaceFormat.colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+      }
+      vk_outarray_append_typed(VkSurfaceFormat2KHR, &out, out_fmt) {
+         out_fmt->surfaceFormat.format = VK_FORMAT_R8G8B8A8_SRGB;
+         out_fmt->surfaceFormat.colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+      }
    } else {
       vk_outarray_append_typed(VkSurfaceFormat2KHR, &out, out_fmt) {
          out_fmt->surfaceFormat.format = VK_FORMAT_R8G8B8A8_UNORM;
@@ -207,6 +241,14 @@ wsi_headless_surface_get_formats2(VkIcdSurfaceBase *icd_surface,
       }
       vk_outarray_append_typed(VkSurfaceFormat2KHR, &out, out_fmt) {
          out_fmt->surfaceFormat.format = VK_FORMAT_B8G8R8A8_UNORM;
+         out_fmt->surfaceFormat.colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+      }
+      vk_outarray_append_typed(VkSurfaceFormat2KHR, &out, out_fmt) {
+         out_fmt->surfaceFormat.format = VK_FORMAT_R8G8B8A8_SRGB;
+         out_fmt->surfaceFormat.colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+      }
+      vk_outarray_append_typed(VkSurfaceFormat2KHR, &out, out_fmt) {
+         out_fmt->surfaceFormat.format = VK_FORMAT_B8G8R8A8_SRGB;
          out_fmt->surfaceFormat.colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
       }
    }
@@ -360,6 +402,15 @@ wsi_headless_swapchain_queue_present(struct wsi_swapchain *wsi_chain,
 }
 
 static VkResult
+wsi_headless_swapchain_wait_for_present(struct wsi_swapchain *wsi_chain,
+                                        uint64_t waitValue,
+                                        uint64_t timeout)
+{
+   return wsi_swapchain_wait_for_present_semaphore(
+      wsi_chain, waitValue, timeout);
+}
+
+static VkResult
 wsi_headless_swapchain_destroy(struct wsi_swapchain *wsi_chain,
                                const VkAllocationCallbacks *pAllocator)
 {
@@ -449,38 +500,39 @@ wsi_headless_surface_create_swapchain(VkIcdSurfaceBase *icd_surface,
    STACK_ARRAY_FINISH(mods);
    STACK_ARRAY_FINISH(mod_props);
 
-   if (result != VK_SUCCESS) {
-      vk_free(pAllocator, chain);
-      return result;
-   }
+   if (result != VK_SUCCESS)
+      goto fail_free_chain;
 
    chain->base.destroy = wsi_headless_swapchain_destroy;
    chain->base.get_wsi_image = wsi_headless_swapchain_get_wsi_image;
    chain->base.acquire_next_image = wsi_headless_swapchain_acquire_next_image;
    chain->base.release_images = wsi_headless_swapchain_release_images;
    chain->base.queue_present = wsi_headless_swapchain_queue_present;
+   chain->base.wait_for_present = wsi_headless_swapchain_wait_for_present;
    chain->base.present_mode = wsi_swapchain_get_present_mode(wsi_device, pCreateInfo);
    chain->base.image_count = num_images;
 
-   for (uint32_t i = 0; i < chain->base.image_count; i++) {
+   uint32_t image = 0;
+   for (; image < chain->base.image_count; image++) {
       result = wsi_create_image(&chain->base, &chain->base.image_info,
-                                &chain->images[i].base);
-      if (result != VK_SUCCESS) {
-         /* Record how many images need to be torn down */
-         chain->base.image_count = i;
-         goto fail;
-      }
+                                &chain->images[image].base);
+      if (result != VK_SUCCESS)
+         goto fail_destroy_images;
 
-      chain->images[i].busy_on_host = false;
-      chain->images[i].busy_on_device = false;
+      chain->images[image].busy_on_host = false;
+      chain->images[image].busy_on_device = false;
    }
 
    *swapchain_out = &chain->base;
 
    return VK_SUCCESS;
 
-fail:
-   wsi_headless_swapchain_destroy(&chain->base, pAllocator);
+fail_destroy_images:
+   for (uint32_t i = 0; i < image; i++)
+      wsi_destroy_image(&chain->base, &chain->images[i].base);
+   wsi_swapchain_finish(&chain->base);
+fail_free_chain:
+   vk_free(pAllocator, chain);
 
    return result;
 }

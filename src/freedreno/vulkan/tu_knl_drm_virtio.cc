@@ -6,7 +6,8 @@
  * Kernel interface layer for turnip running on virtio_gpu (aka virtgpu)
  */
 
-#include "tu_knl.h"
+#include "drm-uapi/msm_drm.h"
+#include "drm-uapi/virtgpu_drm.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -14,24 +15,26 @@
 #include <sys/mman.h>
 #include <xf86drm.h>
 
-#include "vk_util.h"
-
-#include "drm-uapi/msm_drm.h"
-#include "drm-uapi/virtgpu_drm.h"
-#include "util/u_debug.h"
 #include "util/hash_table.h"
 #include "util/libsync.h"
+#include "util/u_debug.h"
 #include "util/u_process.h"
+#include "vk_util.h"
 
 #include "tu_cmd_buffer.h"
 #include "tu_cs.h"
 #include "tu_device.h"
 #include "tu_dynamic_rendering.h"
+#include "tu_knl.h"
 #include "tu_knl_drm.h"
 #include "tu_queue.h"
 
+/* NOLINTBEGIN */
+/* clang-format off */
 #include "vdrm.h"
 #include "msm_proto.h"
+/* clang-format on */
+/* NOLINTEND */
 
 struct tu_userspace_fence_cmd {
    uint32_t pkt[4];    /* first 4 dwords of packet */
@@ -788,12 +791,14 @@ static VkResult
 virtio_bo_init_dmabuf(struct tu_device *dev,
                    struct tu_bo **out_bo,
                    uint64_t size,
+                   enum tu_bo_alloc_flags flags,
                    int prime_fd)
 {
    MESA_TRACE_FUNC();
    struct vdrm_device *vdrm = dev->vdev->vdrm;
    VkResult result;
    struct tu_bo* bo = NULL;
+   flags = (enum tu_bo_alloc_flags)(flags | TU_BO_ALLOC_DMABUF);
 
    /* lseek() to get the real size */
    off_t real_size = lseek(prime_fd, 0, SEEK_END);
@@ -841,8 +846,8 @@ virtio_bo_init_dmabuf(struct tu_device *dev,
    bo->res_id = res_id;
 
    mtx_lock(&dev->vma_mutex);
-   result = virtio_allocate_userspace_iova_locked(dev, handle, size, 0,
-                                                  TU_BO_ALLOC_DMABUF, &iova);
+   result = virtio_allocate_userspace_iova_locked(dev, handle, size, 0, flags,
+                                                  &iova);
    mtx_unlock(&dev->vma_mutex);
    if (result != VK_SUCCESS) {
       vdrm_bo_close(vdrm, handle);
@@ -850,7 +855,7 @@ virtio_bo_init_dmabuf(struct tu_device *dev,
    }
 
    result =
-      tu_bo_init(dev, NULL, bo, handle, size, iova, TU_BO_ALLOC_NO_FLAGS, "dmabuf");
+      tu_bo_init(dev, NULL, bo, handle, size, iova, flags, "dmabuf");
    if (result != VK_SUCCESS) {
       mtx_lock(&dev->vma_mutex);
       util_vma_heap_free(&dev->vma, iova, size);
@@ -1338,6 +1343,7 @@ tu_knl_drm_virtio_load(struct tu_instance *instance,
    device->has_set_iova   = true;
    device->has_lazy_bos   = true;
    device->has_preemption = has_preemption;
+   device->is_perf_cntr_selectable = true;
    device->uche_trap_base = uche_trap_base;
 
    device->ubwc_config.bank_swizzle_levels = bank_swizzle_levels;

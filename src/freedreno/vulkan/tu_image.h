@@ -11,8 +11,8 @@
 #define TU_IMAGE_H
 
 #include "tu_common.h"
-#include "fdl/freedreno_lrz_layout.h"
 
+#include "fdl/freedreno_lrz_layout.h"
 #include "tu_knl.h"
 
 #define TU_MAX_PLANE_COUNT 3
@@ -34,6 +34,7 @@ struct tu_image
    struct vk_image vk;
 
    struct fdl_layout layout[3];
+   uint64_t subsampled_metadata_offset;
    uint64_t total_size;
 
    /* Set when bound */

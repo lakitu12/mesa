@@ -292,13 +292,17 @@ d3d12_video_encoder_destroy(struct pipe_video_codec *codec)
    struct d3d12_context* ctx = d3d12_context(pD3D12Enc->base.context);
    if (ctx->priority_manager)
    {
-      if (ctx->priority_manager->unregister_work_queue(ctx->priority_manager, pD3D12Enc->m_spEncodeCommandQueue.Get()) != 0)
+      // Command queues may be NULL when destroy is called from a failed creation path before initialization reached
+      // the point of registering the command queues, so check for nullptr before trying to unregister from priority manager
+      if (pD3D12Enc->m_spEncodeCommandQueue &&
+          ctx->priority_manager->unregister_work_queue(ctx->priority_manager, pD3D12Enc->m_spEncodeCommandQueue.Get()) != 0)
       {
          debug_printf("D3D12: Failed to unregister command queue with frontend priority manager\n");
          assert(false);
       }
 
-      if (ctx->priority_manager->unregister_work_queue(ctx->priority_manager, pD3D12Enc->m_spResolveCommandQueue.Get()) != 0)
+      if (pD3D12Enc->m_spResolveCommandQueue &&
+          ctx->priority_manager->unregister_work_queue(ctx->priority_manager, pD3D12Enc->m_spResolveCommandQueue.Get()) != 0)
       {
          debug_printf("D3D12: Failed to unregister command queue with frontend priority manager\n");
          assert(false);
@@ -2435,7 +2439,6 @@ d3d12_video_encoder_create_command_objects(struct d3d12_video_encoder *pD3D12Enc
 
       // Initialize fence for the in flight resource pool slot
       inputResource.m_CompletionFence.reset(d3d12_create_fence_raw(pD3D12Enc->m_spFence.Get(), CompletionFenceValue));
-      inputResource.m_CompletionFence.reset(d3d12_create_fence_raw(pD3D12Enc->m_spLastSliceFence.Get(), CompletionFenceValue));
       CompletionFenceValue++;
    }
 
@@ -3025,7 +3028,7 @@ d3d12_video_encoder_calculate_max_slices_count_in_output(
       case D3D12_VIDEO_ENCODER_FRAME_SUBREGION_LAYOUT_MODE_BYTES_PER_SUBREGION:
       case D3D12_VIDEO_ENCODER_FRAME_SUBREGION_LAYOUT_MODE_AUTO:
       {
-         maxSlices = MaxSubregionsNumberFromCaps;
+         maxSlices = std::max(128u, MaxSubregionsNumberFromCaps);
       } break;
       case D3D12_VIDEO_ENCODER_FRAME_SUBREGION_LAYOUT_MODE_SQUARE_UNITS_PER_SUBREGION_ROW_UNALIGNED:
       {
@@ -3319,6 +3322,9 @@ d3d12_video_encoder_encode_bitstream(struct pipe_video_codec * codec,
                                              &slice_fences,
                                              &last_slice_completion_fence,
                                              feedback);
+   // Release local fence references to prevent leaking pipe fences + event handles each frame
+   if (last_slice_completion_fence)
+      d3d12_fence_reference((struct d3d12_fence **)&last_slice_completion_fence, NULL);
 }
 
 void

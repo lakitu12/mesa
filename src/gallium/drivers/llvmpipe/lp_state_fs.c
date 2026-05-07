@@ -107,7 +107,7 @@
 
 #include "lp_screen.h"
 #include "compiler/nir/nir_serialize.h"
-#include "util/mesa-sha1.h"
+#include "util/mesa-blake3.h"
 
 
 /** Fragment shader number (for debugging) */
@@ -471,6 +471,39 @@ lp_build_sample_alpha_to_coverage(struct gallivm_state *gallivm,
       s_mask = LLVMBuildAnd(builder, s_mask, test, "");
       LLVMBuildStore(builder, s_mask, s_mask_ptr);
    }
+};
+
+static void
+lp_build_sample_alpha_to_coverage_per_sample(struct gallivm_state *gallivm,
+                                             struct lp_type type,
+                                             struct lp_build_mask_context *mask,
+                                             unsigned coverage_samples,
+                                             LLVMValueRef num_loop,
+                                             LLVMValueRef loop_counter,
+                                             LLVMValueRef sample_loop_counter,
+                                             LLVMTypeRef coverage_mask_type,
+                                             LLVMValueRef coverage_mask_store,
+                                             LLVMValueRef alpha)
+{
+   struct lp_build_context bld;
+   LLVMBuilderRef builder = gallivm->builder;
+   float step = 1.0 / coverage_samples;
+
+   lp_build_context_init(&bld, gallivm, type);
+   LLVMValueRef alpha_ref_value = LLVMBuildFMul(builder,
+                                                lp_build_const_float(gallivm, step),
+                                                LLVMBuildBitCast(builder, sample_loop_counter, bld.elem_type, ""),
+                                                "");
+   LLVMValueRef test = lp_build_cmp(&bld, PIPE_FUNC_GREATER,
+                                    alpha, lp_build_broadcast_scalar(&bld, alpha_ref_value));
+   LLVMValueRef s_mask_idx = LLVMBuildMul(builder, sample_loop_counter, num_loop, "");
+   s_mask_idx = LLVMBuildAdd(builder, s_mask_idx, loop_counter, "");
+   LLVMValueRef s_mask_ptr = LLVMBuildGEP2(builder, coverage_mask_type,
+                                             coverage_mask_store, &s_mask_idx, 1, "");
+   LLVMValueRef s_mask = LLVMBuildLoad2(builder, coverage_mask_type, s_mask_ptr, "");
+   s_mask = LLVMBuildAnd(builder, s_mask, test, "");
+   LLVMBuildStore(builder, s_mask, s_mask_ptr);
+   lp_build_mask_update(mask, s_mask);
 };
 
 
@@ -1165,8 +1198,18 @@ generate_fs_loop(struct gallivm_state *gallivm,
                                        &mask, alpha,
                                        key->blend.alpha_to_coverage_dither,
                                        (depth_mode & LATE_DEPTH_TEST) != 0);
+         } else if (key->coverage_samples == key->min_samples) {
+            /* when running at sample rate, directly update the current sample's mask to avoid mask desync
+             * PS. I have no idea why this works
+             */
+            lp_build_sample_alpha_to_coverage_per_sample(gallivm, type, &mask,
+                                                         key->coverage_samples, num_loop,
+                                                         loop_state.counter,
+                                                         sample_loop_state.counter,
+                                                         mask_type, mask_store, alpha);
          } else {
-            lp_build_sample_alpha_to_coverage(gallivm, type, key->coverage_samples, num_loop,
+            lp_build_sample_alpha_to_coverage(gallivm, type,
+                                              key->coverage_samples, num_loop,
                                               loop_state.counter,
                                               mask_type, mask_store, alpha);
          }
@@ -1571,7 +1614,7 @@ generate_fs_twiddle(struct gallivm_state *gallivm,
 
       for (unsigned i = 0; i < src_count; ++i) {
          dst[i] = lp_build_swizzle_aos_n(gallivm, dst[i], swizzles,
-                                         type.length, type.length);
+                                         type.length, 0, type.length);
       }
    }
 
@@ -2481,7 +2524,6 @@ generate_unswizzled_blend(struct gallivm_state *gallivm,
 
    const bool is_1d = variant->key.resource_1d;
    const unsigned num_fullblock_fs = is_1d ? 2 * num_fs : num_fs;
-   LLVMValueRef fpstate = NULL;
 
    LLVMTypeRef fs_vec_type = lp_build_vec_type(gallivm, fs_type);
 
@@ -2489,23 +2531,6 @@ generate_unswizzled_blend(struct gallivm_state *gallivm,
    struct lp_type row_type, dst_type;
    lp_blend_type_from_format_desc(out_format_desc, &row_type);
    lp_mem_type_from_format_desc(out_format_desc, &dst_type);
-
-   /*
-    * Technically this code should go into lp_build_smallfloat_to_float
-    * and lp_build_float_to_smallfloat but due to the
-    * http://llvm.org/bugs/show_bug.cgi?id=6393
-    * llvm reorders the mxcsr intrinsics in a way that breaks the code.
-    * So the ordering is important here and there shouldn't be any
-    * llvm ir instrunctions in this function before
-    * this, otherwise half-float format conversions won't work
-    * (again due to llvm bug #6393).
-    */
-   if (have_smallfloat_format(dst_type, out_format)) {
-      /* We need to make sure that denorms are ok for half float
-         conversions */
-      fpstate = lp_build_fpstate_get(gallivm);
-      lp_build_fpstate_set_denorms_zero(gallivm, false);
-   }
 
    struct lp_type mask_type = lp_int32_vec4_type();
    mask_type.length = fs_type.length;
@@ -2859,11 +2884,11 @@ generate_unswizzled_blend(struct gallivm_state *gallivm,
    if (pad_inline) {
       /* Use all 4 channels e.g. from RGBA RGBA to RGxx RGxx */
       blend_color = lp_build_swizzle_aos_n(gallivm, blend_color, swizzle,
-                                           TGSI_NUM_CHANNELS, row_type.length);
+                                           TGSI_NUM_CHANNELS, 0, row_type.length);
    } else {
       /* Only use dst_channels e.g. RGBA RGBA to RG RG xxxx */
       blend_color = lp_build_swizzle_aos_n(gallivm, blend_color, swizzle,
-                                           dst_channels, row_type.length);
+                                           dst_channels, 0, row_type.length);
    }
 
    /*
@@ -3128,10 +3153,6 @@ generate_unswizzled_blend(struct gallivm_state *gallivm,
 
    if (do_branch) {
       lp_build_mask_end(&mask_ctx);
-   }
-
-   if (fpstate) {
-      lp_build_fpstate_set(gallivm, fpstate);
    }
 }
 
@@ -3793,7 +3814,7 @@ lp_debug_fs_variant(struct lp_fragment_shader_variant *variant)
 
 static void
 lp_fs_get_ir_cache_key(struct lp_fragment_shader_variant *variant,
-                       unsigned char ir_sha1_cache_key[SHA1_DIGEST_LENGTH])
+                       unsigned char ir_blake3_cache_key[BLAKE3_KEY_LEN])
 {
    struct blob blob = { 0 };
    unsigned ir_size;
@@ -3804,11 +3825,11 @@ lp_fs_get_ir_cache_key(struct lp_fragment_shader_variant *variant,
    ir_binary = blob.data;
    ir_size = blob.size;
 
-   struct mesa_sha1 ctx;
-   _mesa_sha1_init(&ctx);
-   _mesa_sha1_update(&ctx, &variant->key, variant->shader->variant_key_size);
-   _mesa_sha1_update(&ctx, ir_binary, ir_size);
-   _mesa_sha1_final(&ctx, ir_sha1_cache_key);
+   blake3_hasher ctx;
+   _mesa_blake3_init(&ctx);
+   _mesa_blake3_update(&ctx, &variant->key, variant->shader->variant_key_size);
+   _mesa_blake3_update(&ctx, ir_binary, ir_size);
+   _mesa_blake3_final(&ctx, ir_blake3_cache_key);
 
    blob_finish(&blob);
 }
@@ -3838,12 +3859,12 @@ generate_variant(struct llvmpipe_context *lp,
 
    struct llvmpipe_screen *screen = llvmpipe_screen(lp->pipe.screen);
    struct lp_cached_code cached = { 0 };
-   unsigned char ir_sha1_cache_key[SHA1_DIGEST_LENGTH];
+   unsigned char ir_blake3_cache_key[BLAKE3_KEY_LEN];
    bool needs_caching = false;
    if (shader->base.ir.nir) {
-      lp_fs_get_ir_cache_key(variant, ir_sha1_cache_key);
+      lp_fs_get_ir_cache_key(variant, ir_blake3_cache_key);
 
-      lp_disk_cache_find_shader(screen, &cached, ir_sha1_cache_key);
+      lp_disk_cache_find_shader(screen, &cached, ir_blake3_cache_key);
       if (!cached.data_size)
          needs_caching = true;
    }
@@ -4058,7 +4079,7 @@ generate_variant(struct llvmpipe_context *lp,
    }
 
    if (needs_caching) {
-      lp_disk_cache_insert_shader(screen, &cached, ir_sha1_cache_key);
+      lp_disk_cache_insert_shader(screen, &cached, ir_blake3_cache_key);
    }
 
    gallivm_free_ir(variant->gallivm);
@@ -4276,17 +4297,9 @@ llvmpipe_set_constant_buffer(struct pipe_context *pipe,
    /* note: reference counting */
    util_copy_constant_buffer(&llvmpipe->constants[shader][index], cb);
 
-   /* user_buffer is only valid until the next set_constant_buffer (at most,
-    * possibly until shader deletion), so we need to upload it now to make
-    * sure it doesn't get updated/freed out from under us.
-    */
-   if (constants->user_buffer) {
-      u_upload_data_ref(llvmpipe->pipe.const_uploader, 0, constants->buffer_size,
-                    16, constants->user_buffer, &constants->buffer_offset,
-                    &constants->buffer);
-   }
+   assert(!constants->user_buffer);
    if (constants->buffer) {
-       if (!(constants->buffer->bind & PIPE_BIND_CONSTANT_BUFFER)) {
+      if (!(constants->buffer->bind & PIPE_BIND_CONSTANT_BUFFER)) {
          debug_printf("Illegal set constant without bind flag\n");
          constants->buffer->bind |= PIPE_BIND_CONSTANT_BUFFER;
       }

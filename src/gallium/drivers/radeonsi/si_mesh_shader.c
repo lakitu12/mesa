@@ -785,7 +785,7 @@ static void si_emit_task_wait_packets(struct si_context *sctx)
    if (sctx->task_wait_count == sctx->last_task_wait_count)
       return;
 
-   si_cp_write_data(sctx, sctx->task_wait_buf, 0, 4, V_370_MEM, V_370_ME,
+   si_cp_write_data(sctx, sctx->task_wait_buf, 0, 4, V_371_MEMORY, V_371_MICRO_ENGINE,
                     &sctx->task_wait_count);
 
    si_cp_wait_mem(sctx, sctx->gfx_cs.gang_cs, sctx->task_wait_buf->gpu_address,
@@ -865,12 +865,33 @@ static void si_draw_mesh_tasks(struct pipe_context *ctx,
    if (sctx->bo_list_add_all_mesh_resources)
       si_mesh_resources_add_all_to_bo_list(sctx);
 
+   if (unlikely(sctx->sqtt_enabled)) {
+      enum rgp_sqtt_marker_event_type event;
+      if (info->indirect) {
+         if (info->indirect_draw_count) {
+            event = EventCmdDrawMeshTasksIndirectCountEXT;
+         } else {
+            event = EventCmdDrawMeshTasksIndirectEXT;
+         }
+      } else {
+         event = EventCmdDrawMeshTasksEXT;
+      }
+      si_sqtt_write_event_marker(sctx, &sctx->gfx_cs, event,
+                                 UINT_MAX, UINT_MAX, UINT_MAX);
+   }
+
    if (sctx->ts_shader_state.program) {
       si_emit_task_wait_packets(sctx);
       si_emit_draw_mesh_tasks_ace_packets(sctx, info, prefetch_task_shader);
       si_emit_draw_mesh_tasks_gfx_packets(sctx, info);
    } else {
       si_emit_draw_mesh_shader_only_packets(sctx, info);
+   }
+
+   if (unlikely(sctx->sqtt_enabled)) {
+      radeon_begin(&sctx->gfx_cs);
+      radeon_event_write(V_028A90_THREAD_TRACE_MARKER);
+      radeon_end();
    }
 
    si_prefetch_mesh_shaders(sctx);

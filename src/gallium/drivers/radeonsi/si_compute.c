@@ -44,13 +44,13 @@ static void si_create_compute_state_async(void *job, void *gdata, int thread_ind
    program->shader.is_monolithic = true;
    program->shader.wave_size = si_determine_wave_size(sscreen, &program->shader);
 
-   unsigned char ir_sha1_cache_key[SHA1_DIGEST_LENGTH];
-   si_get_ir_cache_key(sel, false, false, shader->wave_size, ir_sha1_cache_key);
+   unsigned char ir_blake3_cache_key[BLAKE3_KEY_LEN];
+   si_get_ir_cache_key(sel, false, false, shader->wave_size, ir_blake3_cache_key);
 
    /* Try to load the shader from the shader cache. */
    simple_mtx_lock(&sscreen->shader_cache_mutex);
 
-   if (si_shader_cache_load_shader(sscreen, ir_sha1_cache_key, shader)) {
+   if (si_shader_cache_load_shader(sscreen, ir_blake3_cache_key, shader)) {
       simple_mtx_unlock(&sscreen->shader_cache_mutex);
 
       shader->complete_shader_binary_size = si_get_shader_binary_size(sscreen, shader);
@@ -96,7 +96,7 @@ static void si_create_compute_state_async(void *job, void *gdata, int thread_ind
          shader->config.rsrc3 |= S_00B8A0_INST_PREF_SIZE_GFX11(si_get_shader_prefetch_size(shader));
 
       simple_mtx_lock(&sscreen->shader_cache_mutex);
-      si_shader_cache_insert_shader(sscreen, ir_sha1_cache_key, shader, true);
+      si_shader_cache_insert_shader(sscreen, ir_blake3_cache_key, shader, true);
       simple_mtx_unlock(&sscreen->shader_cache_mutex);
    }
 
@@ -500,6 +500,7 @@ static void si_setup_nir_user_data(struct si_context *sctx, const struct pipe_gr
    }
 }
 
+#if 0 /* Disabled because we haven't found a case where it's faster. */
 static bool si_get_2d_interleave_size(const struct pipe_grid_info *info,
                                       unsigned *log_x, unsigned *log_y)
 {
@@ -569,6 +570,7 @@ static bool si_get_2d_interleave_size(const struct pipe_grid_info *info,
    assert(*log_x + *log_y <= 4);
    return true;
 }
+#endif
 
 static void si_emit_dispatch_packets(struct si_context *sctx, const struct pipe_grid_info *info)
 {
@@ -693,7 +695,9 @@ static void si_emit_dispatch_packets(struct si_context *sctx, const struct pipe_
        * Only these values are valid: 0 (disabled), 64, 128, 256, 512
        * 64 = RT, 256 = non-RT (run benchmarks to be sure)
        */
-      unsigned dispatch_interleave = S_00B8BC_INTERLEAVE_1D(256);
+      unsigned dispatch_interleave = S_00B8BC_INTERLEAVE_1D(sctx->compute_dispatch_interleave ?
+                                                               sctx->compute_dispatch_interleave : 256);
+#if 0 /* Disabled because we haven't found a case where it's faster. */
       unsigned log_x, log_y;
 
       /* Launch a 2D subgrid on each SE instead of a 1D subgrid. If enabled, INTERLEAVE_1D is
@@ -714,6 +718,7 @@ static void si_emit_dispatch_packets(struct si_context *sctx, const struct pipe_
                                S_00B8BC_INTERLEAVE_2D_Y_SIZE(log_y);
          dispatch_initiator |= S_00B800_INTERLEAVE_2D_EN(1);
       }
+#endif
 
       if (sctx->is_gfx_queue) {
          radeon_opt_set_sh_reg_idx(R_00B8BC_COMPUTE_DISPATCH_INTERLEAVE,

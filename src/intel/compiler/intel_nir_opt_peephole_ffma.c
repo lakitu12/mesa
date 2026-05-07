@@ -1,24 +1,6 @@
 /*
  * Copyright © 2014 Intel Corporation
- *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice (including the next
- * paragraph) shall be included in all copies or substantial portions of the
- * Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
- * IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  */
 
 #include "intel_nir.h"
@@ -68,13 +50,13 @@ get_mul_for_src(nir_alu_src *src, unsigned num_components,
    nir_alu_instr *alu = nir_src_as_alu(src->src);
 
    /* We want to bail if any of the other ALU operations involved is labeled
-    * exact.  One reason for this is that, while the value that is changing is
+    * no-contract. One reason for this is that, while the value that is changing is
     * actually the result of the add and not the multiply, the intention of
-    * the user when they specify an exact multiply is that they want *that*
+    * the user when they specify an no-contract multiply is that they want *that*
     * value and what they don't care about is the add.  Another reason is that
     * SPIR-V explicitly requires this behaviour.
     */
-   if (!alu || nir_alu_instr_is_exact(alu))
+   if (!alu || nir_alu_instr_no_contract(alu))
       return NULL;
 
    switch (alu->op) {
@@ -160,7 +142,7 @@ intel_nir_opt_peephole_ffma_instr(nir_builder *b,
    if (add->op != nir_op_fadd)
       return false;
 
-   if (nir_alu_instr_is_exact(add))
+   if (nir_alu_instr_no_contract(add))
       return false;
 
 

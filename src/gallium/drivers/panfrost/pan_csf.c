@@ -15,6 +15,7 @@
 #include "pan_csf.h"
 #include "pan_fb_preload.h"
 #include "pan_job.h"
+#include "pan_trace.h"
 
 #if PAN_ARCH < 10
 #error "CSF helpers are only used for gen >= 10"
@@ -207,6 +208,8 @@ fail:
 void
 GENX(csf_cleanup_batch)(struct panfrost_batch *batch)
 {
+   PAN_TRACE_FUNC(PAN_TRACE_GL_CSF);
+
    if (batch->csf.cs.builder) {
       cs_builder_fini(batch->csf.cs.builder);
       free(batch->csf.cs.builder);
@@ -226,6 +229,8 @@ alloc_fbd(struct panfrost_batch *batch)
 int
 GENX(csf_init_batch)(struct panfrost_batch *batch)
 {
+   PAN_TRACE_FUNC(PAN_TRACE_GL_CSF);
+
    struct panfrost_device *dev = pan_device(batch->ctx->base.screen);
 
    /* Initialize the CS chunk pool. */
@@ -585,7 +590,7 @@ csf_submit_wait_and_dump(struct panfrost_batch *batch,
 
    /* Wait so we can get errors reported back */
    if (wait) {
-      int ret =
+      ASSERTED int ret =
          drmSyncobjTimelineWait(panfrost_device_fd(dev), &vm_sync_handle,
                                 &vm_sync_signal_point, 1, INT64_MAX, 0, NULL);
       assert(ret >= 0);
@@ -627,6 +632,8 @@ csf_submit_wait_and_dump(struct panfrost_batch *batch,
 int
 GENX(csf_submit_batch)(struct panfrost_batch *batch)
 {
+   PAN_TRACE_FUNC(PAN_TRACE_GL_CSF);
+
    int ret;
 
    /* Close the batch before submitting. */
@@ -739,6 +746,8 @@ GENX(csf_prepare_tiler)(struct panfrost_batch *batch, struct pan_fb_info *fb)
 void
 GENX(csf_preload_fb)(struct panfrost_batch *batch, struct pan_fb_info *fb)
 {
+   PAN_TRACE_FUNC(PAN_TRACE_GL_CSF);
+
    struct panfrost_device *dev = pan_device(batch->ctx->base.screen);
 
    GENX(pan_preload_fb)
@@ -755,6 +764,8 @@ void
 GENX(csf_emit_fbds)(struct panfrost_batch *batch, struct pan_fb_info *fb,
                     struct pan_tls_info *tls)
 {
+   PAN_TRACE_FUNC(PAN_TRACE_GL_CSF);
+
    struct panfrost_device *dev = pan_device(batch->ctx->base.screen);
 
    /* Default framebuffer descriptor */
@@ -831,6 +842,8 @@ void
 GENX(csf_emit_fragment_job)(struct panfrost_batch *batch,
                             const struct pan_fb_info *pfb)
 {
+   PAN_TRACE_FUNC(PAN_TRACE_GL_CSF);
+
    struct cs_builder *b = batch->csf.cs.builder;
    struct pan_csf_tiler_oom_ctx *oom_ctx = batch->csf.tiler_oom_ctx.cpu;
 
@@ -910,6 +923,8 @@ void
 GENX(csf_launch_grid)(struct panfrost_batch *batch,
                       const struct pipe_grid_info *info)
 {
+   PAN_TRACE_FUNC(PAN_TRACE_GL_CSF);
+
    /* Empty compute programs are invalid and don't make sense */
    if (batch->rsd[MESA_SHADER_COMPUTE] == 0)
       return;
@@ -1032,6 +1047,8 @@ void
 GENX(csf_launch_xfb)(struct panfrost_batch *batch,
                      const struct pipe_draw_info *info, unsigned count)
 {
+   PAN_TRACE_FUNC(PAN_TRACE_GL_CSF);
+
    struct cs_builder *b = batch->csf.cs.builder;
 
    cs_move64_to(b, cs_sr_reg64(b, COMPUTE, TSD_0), batch->tls.gpu);
@@ -1100,7 +1117,7 @@ csf_emit_draw_state(struct panfrost_batch *batch,
    struct panfrost_compiled_shader *vs = ctx->prog[MESA_SHADER_VERTEX];
    struct panfrost_compiled_shader *fs = ctx->prog[MESA_SHADER_FRAGMENT];
 
-   bool idvs = vs->info.vs.idvs;
+   ASSERTED bool idvs = vs->info.vs.idvs;
    bool fs_required = panfrost_fs_required(
       fs, ctx->blend, &ctx->pipe_framebuffer, ctx->depth_stencil);
    bool secondary_shader = vs->info.vs.secondary_enable && fs_required;
@@ -1160,14 +1177,14 @@ csf_emit_draw_state(struct panfrost_batch *batch,
                 fui(batch->maximum_z));
 #endif
 
-   if (ctx->occlusion_query && ctx->active_queries) {
+   if (panfrost_occlusion_query_active(ctx)) {
       struct panfrost_resource *rsrc = pan_resource(ctx->occlusion_query->rsrc);
       cs_move64_to(b, cs_sr_reg64(b, IDVS, OQ), rsrc->plane.base);
       panfrost_batch_write_rsrc(ctx->batch, rsrc, MESA_SHADER_FRAGMENT);
    }
 
    cs_move32_to(b, cs_sr_reg32(b, IDVS, VARY_SIZE),
-                panfrost_vertex_attribute_stride(vs, fs));
+                vs->info.varyings.formats.generic_size_B);
    cs_move64_to(b, cs_sr_reg64(b, IDVS, BLEND_DESC),
                 batch->blend | MAX2(batch->key.nr_cbufs, 1));
    cs_move64_to(b, cs_sr_reg64(b, IDVS, ZSD), batch->depth_stencil);
@@ -1357,6 +1374,8 @@ GENX(csf_launch_draw)(struct panfrost_batch *batch,
                       const struct pipe_draw_start_count_bias *draw,
                       unsigned vertex_count)
 {
+   PAN_TRACE_FUNC(PAN_TRACE_GL_CSF);
+
    struct cs_builder *b = batch->csf.cs.builder;
 
    uint32_t flags_override = csf_emit_draw_state(batch, info, drawid_offset);
@@ -1364,6 +1383,7 @@ GENX(csf_launch_draw)(struct panfrost_batch *batch,
 
    cs_move32_to(b, cs_sr_reg32(b, IDVS, INDEX_COUNT), draw->count);
    cs_move32_to(b, cs_sr_reg32(b, IDVS, INSTANCE_COUNT), info->instance_count);
+   cs_move32_to(b, cs_sr_reg32(b, IDVS, INDEX_OFFSET), 0);
    cs_move32_to(b, cs_sr_reg32(b, IDVS, INSTANCE_OFFSET), 0);
 
    /* Base vertex offset on Valhall is used for both indexed and
@@ -1393,6 +1413,8 @@ GENX(csf_launch_draw_indirect)(struct panfrost_batch *batch,
                                unsigned drawid_offset,
                                const struct pipe_draw_indirect_info *indirect)
 {
+   PAN_TRACE_FUNC(PAN_TRACE_GL_CSF);
+
    struct cs_builder *b = batch->csf.cs.builder;
 
    uint32_t flags_override = csf_emit_draw_state(batch, info, drawid_offset);
@@ -1469,6 +1491,8 @@ get_device_reset_status(struct pipe_context *pctx)
 int
 GENX(csf_init_context)(struct panfrost_context *ctx)
 {
+   PAN_TRACE_FUNC(PAN_TRACE_GL_CSF);
+
    struct panfrost_screen *screen = pan_screen(ctx->base.screen);
    struct panfrost_device *dev = pan_device(ctx->base.screen);
    struct drm_panthor_queue_create qc[] = {{
@@ -1636,6 +1660,8 @@ err_group_create:
 void
 GENX(csf_cleanup_context)(struct panfrost_context *ctx)
 {
+   PAN_TRACE_FUNC(PAN_TRACE_GL_CSF);
+
    if (!ctx->csf.is_init)
       return;
 
@@ -1643,7 +1669,7 @@ GENX(csf_cleanup_context)(struct panfrost_context *ctx)
    struct drm_panthor_tiler_heap_destroy thd = {
       .handle = ctx->csf.heap.handle,
    };
-   int ret;
+   ASSERTED int ret;
 
    /* Make sure all jobs are done before destroying the heap. */
    ret = drmSyncobjWait(panfrost_device_fd(dev), &ctx->syncobj, 1, INT64_MAX, 0,

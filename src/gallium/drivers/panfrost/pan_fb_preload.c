@@ -16,6 +16,7 @@
 #include "pan_pool.h"
 #include "pan_shader.h"
 #include "pan_texture.h"
+#include "pan_trace.h"
 #include "compiler/pan_compiler.h"
 #include "compiler/pan_nir.h"
 
@@ -438,9 +439,10 @@ pan_preload_get_shader(struct pan_fb_preload_cache *cache,
                   key->surfaces[i].samples);
    }
 
+   const nir_shader_compiler_options *compiler_options =
+      pan_get_nir_shader_compiler_options(PAN_ARCH, false);
    nir_builder b = nir_builder_init_simple_shader(
-      MESA_SHADER_FRAGMENT, pan_get_nir_shader_compiler_options(PAN_ARCH),
-      "pan_preload(%s)", sig);
+      MESA_SHADER_FRAGMENT, compiler_options, "pan_preload(%s)", sig);
 
    nir_def *barycentric = nir_load_barycentric(
       &b, nir_intrinsic_load_barycentric_pixel, INTERP_MODE_SMOOTH);
@@ -539,7 +541,6 @@ pan_preload_get_shader(struct pan_fb_preload_cache *cache,
       BITSET_SET(b.shader->info.textures_used, i);
 
    pan_preprocess_nir(b.shader, inputs.gpu_id);
-   pan_nir_lower_texture_early(b.shader, inputs.gpu_id);
    pan_postprocess_nir(b.shader, inputs.gpu_id);
 
    if (PAN_ARCH == 4) {
@@ -1222,7 +1223,7 @@ pan_preload_emit_pre_frame_dcd(struct pan_fb_preload_cache *cache,
 
       /* If we're dealing with a combined ZS resource and only one
        * component is cleared, we need to reload the whole surface
-       * because the zs_clean_pixel_write_enable flag is set in that
+       * because the zs_clean_tile_write_enable flag is set in that
        * case.
        */
       if (util_format_is_depth_and_stencil(fmt) &&
@@ -1253,7 +1254,9 @@ pan_preload_emit_pre_frame_dcd(struct pan_fb_preload_cache *cache,
        * The PAN_ARCH check is redundant but allows the compiler to optimize
        * when PAN_ARCH < 7.
        */
-      if (PAN_ARCH >= 7 && (cache->gpu_id >> 16) >= 0x7200)
+      unsigned arch_major = PAN_ARCH_MAJOR(cache->gpu_id);
+      unsigned arch_minor = PAN_ARCH_MINOR(cache->gpu_id);
+      if (PAN_ARCH >= 7 && (arch_major == 7 && arch_minor >= 2))
          fb->bifrost.pre_post.modes[dcd_idx] =
             MALI_PRE_POST_FRAME_SHADER_MODE_EARLY_ZS_ALWAYS;
       else
@@ -1317,6 +1320,8 @@ unsigned
 GENX(pan_preload_fb)(struct pan_fb_preload_cache *cache, struct pan_pool *pool,
                      struct pan_fb_info *fb, uint64_t tsd, struct pan_ptr *jobs)
 {
+   PAN_TRACE_FUNC(PAN_TRACE_GL_FB_PRELOAD);
+
    bool preload_zs = pan_preload_needed(fb, true);
    bool preload_rts = pan_preload_needed(fb, false);
    uint64_t coords;
@@ -1393,7 +1398,7 @@ pan_preload_prefill_preload_shader_cache(struct pan_fb_preload_cache *cache)
 
 void
 GENX(pan_fb_preload_cache_init)(
-   struct pan_fb_preload_cache *cache, unsigned gpu_id, uint32_t gpu_variant,
+   struct pan_fb_preload_cache *cache, uint64_t gpu_id, uint32_t gpu_variant,
    struct pan_blend_shader_cache *blend_shader_cache, struct pan_pool *bin_pool,
    struct pan_pool *desc_pool)
 {

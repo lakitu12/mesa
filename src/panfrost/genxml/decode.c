@@ -50,6 +50,35 @@ pandecode_midgard_tiler_descriptor(struct pandecode_context *ctx,
 #endif
 
 #if PAN_ARCH >= 5
+static const char *
+block_format_string(enum mali_block_format block_format)
+{
+   switch (block_format) {
+#if PAN_ARCH >= 7
+   case MALI_BLOCK_FORMAT_NO_WRITE:
+#else
+   case MALI_BLOCK_FORMAT_TILED_LINEAR:
+#endif
+   case MALI_BLOCK_FORMAT_TILED_U_INTERLEAVED:
+      return "U-Tiled";
+   case MALI_BLOCK_FORMAT_LINEAR:
+      return "Linear";
+#if PAN_ARCH >= 10
+   case MALI_BLOCK_FORMAT_INTERLEAVED_64K:
+      return "Interleaved 64K";
+#endif
+   case MALI_BLOCK_FORMAT_AFBC:
+      return "AFBC";
+#if PAN_ARCH >= 7
+   case MALI_BLOCK_FORMAT_AFBC_TILED:
+      return "AFBC-Tiled";
+#endif
+   default:
+      UNREACHABLE("unsupported block format");
+      return "???";
+   }
+}
+
 static void
 pandecode_rt(struct pandecode_context *ctx, unsigned index, uint64_t gpu_va)
 {
@@ -74,7 +103,8 @@ pandecode_rt(struct pandecode_context *ctx, unsigned index, uint64_t gpu_va)
    }
 #endif
 
-   switch (rt.rgb.writeback_block_format) {
+   enum mali_block_format writeback_block_format = rt.rgb.writeback_block_format;
+   switch (writeback_block_format) {
 #if PAN_ARCH >= 7
    case MALI_BLOCK_FORMAT_NO_WRITE:
 #else
@@ -82,19 +112,18 @@ pandecode_rt(struct pandecode_context *ctx, unsigned index, uint64_t gpu_va)
 #endif
    case MALI_BLOCK_FORMAT_TILED_U_INTERLEAVED:
    case MALI_BLOCK_FORMAT_LINEAR:
+#if PAN_ARCH >= 10
+   case MALI_BLOCK_FORMAT_INTERLEAVED_64K:
+#endif
       if (rt.rgb.yuv_enable) {
          DUMP_UNPACKED(ctx, YUV_RENDER_TARGET, rt.yuv,
                        "%s YUV Color Render Target %d:\n",
-                       rt.rgb.writeback_block_format == MALI_BLOCK_FORMAT_LINEAR
-                          ? "Linear"
-                          : "U-Tiled",
+                       block_format_string(writeback_block_format),
                        index);
       } else {
          DUMP_UNPACKED(ctx, RGB_RENDER_TARGET, rt.rgb,
                        "%s RGB Color Render Target %d:\n",
-                       rt.rgb.writeback_block_format == MALI_BLOCK_FORMAT_LINEAR
-                          ? "Linear"
-                          : "U-Tiled",
+                       block_format_string(writeback_block_format),
                        index);
       }
       break;
@@ -105,7 +134,9 @@ pandecode_rt(struct pandecode_context *ctx, unsigned index, uint64_t gpu_va)
 #if PAN_ARCH >= 6
       if (rt.rgb.yuv_enable) {
          DUMP_UNPACKED(ctx, AFBC_YUV_RENDER_TARGET, rt.afbc_yuv,
-                       "AFBC YUV Color Render Target %d:\n", index);
+                       "%s YUV Color Render Target %d:\n",
+                       block_format_string(writeback_block_format),
+                       index);
          break;
       }
 #else
@@ -113,13 +144,16 @@ pandecode_rt(struct pandecode_context *ctx, unsigned index, uint64_t gpu_va)
 #endif
 
       DUMP_UNPACKED(ctx, AFBC_RGB_RENDER_TARGET, rt.afbc_rgb,
-                    "AFBC RGB Color Render Target %d:\n", index);
+                    "%s RGB Color Render Target %d:\n",
+                    block_format_string(writeback_block_format),
+                    index);
       break;
    }
+
 }
 
 static void
-pandecode_rts(struct pandecode_context *ctx, uint64_t gpu_va, unsigned gpu_id,
+pandecode_rts(struct pandecode_context *ctx, uint64_t gpu_va,
               const struct MALI_FRAMEBUFFER_PARAMETERS *fb)
 {
    pandecode_log(ctx, "Color Render Targets @%" PRIx64 ":\n", gpu_va);
@@ -207,7 +241,7 @@ pandecode_sample_locations(struct pandecode_context *ctx, const void *fb)
 
 struct pandecode_fbd
 GENX(pandecode_fbd)(struct pandecode_context *ctx, uint64_t gpu_va,
-                    bool is_fragment, unsigned gpu_id)
+                    bool is_fragment, uint64_t gpu_id)
 {
    const void *PANDECODE_PTR_VAR(ctx, fb, (uint64_t)gpu_va);
    pan_section_unpack(fb, FRAMEBUFFER, PARAMETERS, params);
@@ -268,7 +302,7 @@ GENX(pandecode_fbd)(struct pandecode_context *ctx, uint64_t gpu_va,
    DUMP_UNPACKED(ctx, FRAMEBUFFER_PARAMETERS, params, "Parameters:\n");
 #if PAN_ARCH >= 6
    if (params.tiler)
-      GENX(pandecode_tiler)(ctx, params.tiler, gpu_id);
+      GENX(pandecode_tiler)(ctx, params.tiler);
 #endif
 
    ctx->indent--;
@@ -284,7 +318,7 @@ GENX(pandecode_fbd)(struct pandecode_context *ctx, uint64_t gpu_va,
    }
 
    if (is_fragment)
-      pandecode_rts(ctx, gpu_va, gpu_id, &params);
+      pandecode_rts(ctx, gpu_va, &params);
 
    return (struct pandecode_fbd){
       .rt_count = params.render_target_count,
@@ -497,8 +531,7 @@ GENX(pandecode_texture)(struct pandecode_context *ctx,
 
 #if PAN_ARCH >= 6
 void
-GENX(pandecode_tiler)(struct pandecode_context *ctx, uint64_t gpu_va,
-                      unsigned gpu_id)
+GENX(pandecode_tiler)(struct pandecode_context *ctx, uint64_t gpu_va)
 {
    pan_unpack(PANDECODE_PTR(ctx, gpu_va, struct mali_tiler_context_packed),
               TILER_CONTEXT, t);
@@ -535,7 +568,7 @@ GENX(pandecode_fau)(struct pandecode_context *ctx, uint64_t addr,
 
 uint64_t
 GENX(pandecode_shader)(struct pandecode_context *ctx, uint64_t addr,
-                       const char *label, unsigned gpu_id)
+                       const char *label, uint64_t gpu_id)
 {
    MAP_ADDR(ctx, SHADER_PROGRAM, addr, cl);
    pan_unpack(cl, SHADER_PROGRAM, desc);
@@ -657,7 +690,7 @@ GENX(pandecode_depth_stencil)(struct pandecode_context *ctx, uint64_t addr)
 void
 GENX(pandecode_shader_environment)(struct pandecode_context *ctx,
                                    const struct MALI_SHADER_ENVIRONMENT *p,
-                                   unsigned gpu_id)
+                                   uint64_t gpu_id)
 {
    if (p->shader)
       GENX(pandecode_shader)(ctx, p->shader, "Shader", gpu_id);
@@ -675,7 +708,7 @@ GENX(pandecode_shader_environment)(struct pandecode_context *ctx,
 void
 GENX(pandecode_blend_descs)(struct pandecode_context *ctx, uint64_t blend,
                             unsigned count, uint64_t frag_shader,
-                            unsigned gpu_id)
+                            uint64_t gpu_id)
 {
    for (unsigned i = 0; i < count; ++i) {
       struct mali_blend_packed *PANDECODE_PTR_VAR(ctx, blend_descs, blend);
@@ -692,7 +725,7 @@ GENX(pandecode_blend_descs)(struct pandecode_context *ctx, uint64_t blend,
 
 void
 GENX(pandecode_dcd)(struct pandecode_context *ctx, const struct MALI_DRAW *p,
-                    unsigned unused, unsigned gpu_id)
+                    unsigned unused, uint64_t gpu_id)
 {
    uint64_t frag_shader = 0;
 

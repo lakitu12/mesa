@@ -53,13 +53,9 @@ static const nir_shader_compiler_options nir_options = {
    .lower_fpow = true,
    .lower_fsqrt = true,
    .lower_ftrunc = true,
+   .lower_iadd_sat = true,
    .lower_ifind_msb = true,
-   .lower_ldexp = true,
    .lower_layer_fs_input_to_sysval = true,
-   .lower_uadd_carry = true,
-   .lower_uadd_sat = true,
-   .lower_usub_borrow = true,
-   .lower_usub_sat = true,
    .lower_mul_2x32_64 = true,
    .compact_arrays = true,
    .scalarize_ddx = true,
@@ -540,6 +536,7 @@ void pco_preprocess_nir(pco_ctx *ctx, nir_shader *nir)
       const struct nir_lower_sysvals_to_varyings_options sysvals_to_varyings = {
          .frag_coord = true,
          .point_coord = true,
+         .primitive_id = nir->info.stage == MESA_SHADER_FRAGMENT,
       };
       NIR_PASS(_, nir, nir_lower_sysvals_to_varyings, &sysvals_to_varyings);
       NIR_PASS(_, nir, nir_lower_helper_writes, true);
@@ -895,7 +892,7 @@ void pco_lower_nir(pco_ctx *ctx, nir_shader *nir, pco_data *data)
    if (nir->info.stage == MESA_SHADER_VERTEX)
       NIR_PASS(_, nir, pco_nir_lower_clip_cull_vars);
 
-   NIR_PASS(_, nir, pco_nir_lower_images, data);
+   NIR_PASS(_, nir, pco_nir_lower_images, data, ctx);
    NIR_PASS(_, nir, pco_nir_lower_atomics, data);
    NIR_PASS(_,
             nir,
@@ -924,8 +921,7 @@ void pco_lower_nir(pco_ctx *ctx, nir_shader *nir, pco_data *data)
                nir,
                nir_lower_point_size,
                PVR_POINT_SIZE_RANGE_MIN,
-               PVR_POINT_SIZE_RANGE_MAX,
-               nir_type_invalid);
+               PVR_POINT_SIZE_RANGE_MAX);
 
       if (!nir->info.internal)
          NIR_PASS(_, nir, pco_nir_point_size);

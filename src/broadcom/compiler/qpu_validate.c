@@ -62,19 +62,17 @@ fail_instr(struct v3d_qpu_validate_state *state, const char *msg)
 {
         struct v3d_compile *c = state->c;
 
-        fprintf(stderr, "v3d_qpu_validate at ip %d: %s:\n", state->ip, msg);
+        mesa_loge("v3d_qpu_validate at ip %d: %s:\n", state->ip, msg);
 
         int dump_ip = 0;
         vir_for_each_inst_inorder(inst, c) {
-                v3d_qpu_dump(c->devinfo, &inst->qpu);
-
-                if (dump_ip++ == state->ip)
-                        fprintf(stderr, " *** ERROR ***");
-
-                fprintf(stderr, "\n");
+                const char *str = v3d_qpu_decode(c->devinfo, &inst->qpu);
+                mesa_loge("%s%s",
+                          str,
+                          dump_ip++ == state->ip ? " *** ERROR ***" : "");
+                ralloc_free((void *)str);
         }
 
-        fprintf(stderr, "\n");
         abort();
 }
 
@@ -141,8 +139,17 @@ qpu_validate_inst(struct v3d_qpu_validate_state *state, struct qinst *qinst)
 
         assert(inst->type == V3D_QPU_INSTR_TYPE_ALU);
 
-        if (inst->alu.mul.op == V3D_QPU_M_MULTOP)
-            state->rtop_valid = true;
+        if (inst->alu.mul.op == V3D_QPU_M_MULTOP) {
+            /* On unconditional branches qpu_set_branch_targets() can fill the
+             * delay slots with a copy of the first instructions of the
+             * successor block. As the qpu validator is sequential it would
+             * detect a non real hazard when the MULTOP was copied but the
+             * UMUL24 wasn't. So we disable the hazard detection mechanism in
+             * this case.
+             */
+            if (!in_branch_delay_slots(state))
+                state->rtop_valid = true;
+        }
 
         if (inst->alu.mul.op == V3D_QPU_M_UMUL24) {
             if (state->rtop_hazard)

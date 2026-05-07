@@ -219,10 +219,6 @@ void si_flush_gfx_cs(struct si_context *ctx, unsigned flags, struct pipe_fence_h
       si_check_vm_faults(ctx, &ctx->current_saved_cs->gfx);
    }
 
-   if (unlikely(ctx->sqtt && (flags & PIPE_FLUSH_END_OF_FRAME))) {
-      si_handle_sqtt(ctx, &ctx->gfx_cs);
-   }
-
    if (ctx->current_saved_cs)
       si_saved_cs_reference(&ctx->current_saved_cs, NULL);
 
@@ -231,6 +227,10 @@ void si_flush_gfx_cs(struct si_context *ctx, unsigned flags, struct pipe_fence_h
 
    si_begin_new_gfx_cs(ctx, false);
    ctx->gfx_flush_in_progress = false;
+
+   if (unlikely(ctx->sqtt && (flags & PIPE_FLUSH_END_OF_FRAME))) {
+      si_handle_sqtt(ctx, &ctx->gfx_cs);
+   }
 
 #if SHADER_DEBUG_LOG
    if (debug_get_bool_option("shaderlog", false))
@@ -573,7 +573,7 @@ void si_trace_emit(struct si_context *sctx)
    struct radeon_cmdbuf *cs = &sctx->gfx_cs;
    uint32_t trace_id = ++sctx->current_saved_cs->trace_id;
 
-   si_cp_write_data(sctx, sctx->current_saved_cs->trace_buf, 0, 4, V_370_MEM, V_370_ME, &trace_id);
+   si_cp_write_data(sctx, sctx->current_saved_cs->trace_buf, 0, 4, V_371_MEMORY, V_371_MICRO_ENGINE, &trace_id);
 
    ac_emit_cp_nop(&cs->current, AC_ENCODE_TRACE_POINT(trace_id));
 

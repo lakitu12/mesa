@@ -95,6 +95,7 @@ nvk_create_cmd_buffer(struct vk_command_pool *vk_pool,
    list_inithead(&cmd->owned_gart_mem);
    list_inithead(&cmd->owned_qmd);
    cmd->pushes = UTIL_DYNARRAY_INIT;
+   cmd->copy_memory_indirect_temps = UTIL_DYNARRAY_INIT;
 
    cmd->prev_subc = ffs(nvk_cmd_buffer_subchannel_mask(cmd)) - 1;
 
@@ -126,6 +127,7 @@ nvk_reset_cmd_buffer(struct vk_command_buffer *vk_cmd_buffer,
    cmd->cond_render_mem = NULL;
 
    util_dynarray_clear(&cmd->pushes);
+   util_dynarray_clear(&cmd->copy_memory_indirect_temps);
 
    memset(&cmd->state, 0, sizeof(cmd->state));
 }
@@ -839,7 +841,7 @@ nvk_bind_descriptor_sets(struct nvk_cmd_buffer *cmd,
    struct nvk_device *dev = nvk_cmd_buffer_device(cmd);
    const struct nvk_physical_device *pdev = nvk_device_physical(dev);
 
-   union nvk_buffer_descriptor dynamic_buffers[NVK_MAX_DYNAMIC_BUFFERS];
+   uint32_t dynamic_buffers[4][NVK_MAX_DYNAMIC_BUFFERS];
    uint8_t set_dynamic_buffer_start[NVK_MAX_SETS];
 
    /* Read off the current dynamic buffer start array so we can use it to
@@ -863,14 +865,9 @@ nvk_bind_descriptor_sets(struct nvk_cmd_buffer *cmd,
     * it changes set_dynamic_buffer_start[s], this binding is implicitly
     * invalidated.
     */
-   uint8_t dyn_buffer_end = 0u;
-   for (uint32_t i = 0u; i < info->firstSet; ++i) {
-      const struct nvk_descriptor_set_layout *set_layout =
-         vk_to_nvk_descriptor_set_layout(pipeline_layout->set_layouts[i]);
-      if (set_layout)
-         dyn_buffer_end += set_layout->dynamic_buffer_count;
-   }
-   const uint8_t dyn_buffer_start = dyn_buffer_end;
+   const uint8_t dyn_buffer_start =
+      pipeline_layout->dynamic_descriptor_offset[info->firstSet];
+   uint8_t dyn_buffer_end = dyn_buffer_start;
 
    uint32_t next_dyn_offset = 0;
    for (uint32_t i = 0; i < info->descriptorSetCount; ++i) {
@@ -898,8 +895,8 @@ nvk_bind_descriptor_sets(struct nvk_cmd_buffer *cmd,
          const struct nvk_descriptor_set_layout *set_layout =
             vk_to_nvk_descriptor_set_layout(pipeline_layout->set_layouts[s]);
 
-         if (set != NULL && set_layout->dynamic_buffer_count > 0) {
-            for (uint32_t j = 0; j < set_layout->dynamic_buffer_count; j++) {
+         if (set != NULL && set_layout->vk.dynamic_descriptor_count > 0) {
+            for (uint32_t j = 0; j < set_layout->vk.dynamic_descriptor_count; j++) {
                union nvk_buffer_descriptor db = set->dynamic_buffers[j];
                uint32_t offset = info->pDynamicOffsets[next_dyn_offset + j];
                if (BITSET_TEST(set_layout->dynamic_ubos, j) &&
@@ -913,12 +910,13 @@ nvk_bind_descriptor_sets(struct nvk_cmd_buffer *cmd,
                } else {
                   db.addr.base_addr += offset;
                }
-               dynamic_buffers[dyn_buffer_end + j] = db;
+               for (int k = 0; k < 4; k++)
+                  dynamic_buffers[k][dyn_buffer_end + j] = db.values[k];
             }
-            next_dyn_offset += set->layout->dynamic_buffer_count;
+            next_dyn_offset += set->layout->vk.dynamic_descriptor_count;
          }
 
-         dyn_buffer_end += set_layout->dynamic_buffer_count;
+         dyn_buffer_end += set_layout->vk.dynamic_descriptor_count;
       } else {
          assert(set == NULL);
       }
@@ -926,9 +924,10 @@ nvk_bind_descriptor_sets(struct nvk_cmd_buffer *cmd,
    assert(dyn_buffer_end <= NVK_MAX_DYNAMIC_BUFFERS);
    assert(next_dyn_offset <= info->dynamicOffsetCount);
 
-   nvk_descriptor_state_set_root_array(cmd, desc, dynamic_buffers,
-                                       dyn_buffer_start, dyn_buffer_end - dyn_buffer_start,
-                                       &dynamic_buffers[dyn_buffer_start]);
+   for (int i = 0; i < 4; i++)
+      nvk_descriptor_state_set_root_array(cmd, desc, dynamic_buffers[i],
+                                          dyn_buffer_start, dyn_buffer_end - dyn_buffer_start,
+                                          &dynamic_buffers[i][dyn_buffer_start]);
 
    /* We need to at least sync everything from first_set to NVK_MAX_SETS.
     * However, we only save anything if firstSet >= 4 so we may as well sync
@@ -1178,6 +1177,20 @@ nvk_cmd_buffer_flush_push_descriptors(struct nvk_cmd_buffer *cmd,
    }
 }
 
+void
+nvk_cmd_buffer_flush_printf_buffer(struct nvk_cmd_buffer *cmd,
+                                   struct nvk_descriptor_state *desc)
+{
+   struct nvk_device *dev = nvk_cmd_buffer_device(cmd);
+
+   if (!NAK_CAN_PRINTF)
+      return;
+
+   struct nvkmd_mem *bo = (struct nvkmd_mem *) dev->printf.bo;
+   nvk_descriptor_state_set_root(cmd, desc, printf_buffer_addr,
+                                 bo->va->addr);
+}
+
 bool
 nvk_cmd_buffer_get_cbuf_addr(struct nvk_cmd_buffer *cmd,
                              const struct nvk_descriptor_state *desc,
@@ -1214,7 +1227,8 @@ nvk_cmd_buffer_get_cbuf_addr(struct nvk_cmd_buffer *cmd,
          desc, set_dynamic_buffer_start[cbuf->desc_set], &dyn_idx);
       dyn_idx += cbuf->dynamic_idx;
       union nvk_buffer_descriptor ubo_desc;
-      nvk_descriptor_state_get_root(desc, dynamic_buffers[dyn_idx], &ubo_desc);
+      for (int i = 0; i < 4; i++)
+         nvk_descriptor_state_get_root(desc, dynamic_buffers[i][dyn_idx], &ubo_desc.values[i]);
       *addr_out = nvk_ubo_descriptor_addr(pdev, ubo_desc);
       return true;
    }

@@ -13,12 +13,12 @@ endif
 #===============#
 # Configuration #
 #===============#
-gfxstream_guest_args = ['-D_FILE_OFFSET_BITS=64']
+gfxstream_guest_args = cpp_msvc_compat_args + ['-D_FILE_OFFSET_BITS=64']
 
 # Our internal guest build
 if host_machine.system() == 'windows'
     gfxstream_guest_args += '-DWINDOWS_GUEST_BUILD'
-else
+elif host_machine.system() != 'fuchsia'
     gfxstream_guest_args += '-DLINUX_GUEST_BUILD'
 endif
 
@@ -46,9 +46,12 @@ gfxstream_guest_args += '-DVK_GRAPHICS_VERSION_1_4'
 gfxstream_guest_args += '-DVK_COMPUTE_VERSION_1_4'
 
 if with_gfxstream_emulated_android
-  gfxstream_guest_args += '-DEND2END_TESTS'
+    gfxstream_guest_args += '-DEND2END_TESTS'
 endif
 
+if with_platform_android
+    gfxstream_guest_args += '-DGFXSTREAM_ENABLE_GUEST_GOLDFISH'
+endif
 
 #====================================#
 #   Standard deps                    #

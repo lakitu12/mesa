@@ -10,6 +10,7 @@
 
 #include "util/format/u_format.h"
 #include "util/half_float.h"
+#include "util/u_math.h"
 #include "util/u_pack_color.h"
 #include "util/u_surface.h"
 
@@ -108,12 +109,19 @@ static uint32_t r300_depth_clear_cb_value(enum pipe_format format,
                                           const float* rgba)
 {
     union util_color uc;
+
+    format = r300_unbyteswap_array_format(format);
+
     util_pack_color(rgba, format, &uc);
 
-    if (util_format_get_blocksizebits(format) == 32)
-        return uc.ui[0];
-    else
-        return uc.us | (uc.us << 16);
+    if (util_format_get_blocksizebits(format) == 32) {
+        /* CBZB clears reuse ZB_DEPTHCLEARVALUE, which expects the 32-bit
+         * payload in little-endian byte order.
+         */
+        return util_cpu_to_le32(uc.ui[0]);
+    }
+
+    return uc.us | (uc.us << 16);
 }
 
 static bool r300_cbzb_clear_allowed(struct r300_context *r300,
@@ -208,6 +216,8 @@ DEBUG_GET_ONCE_BOOL_OPTION(hyperz, "RADEON_HYPERZ", false)
 /* Clear currently bound buffers. */
 static void r300_clear(struct pipe_context* pipe,
                        unsigned buffers,
+                       uint32_t color_clear_mask,
+                       uint8_t stencil_clear_mask,
                        const struct pipe_scissor_state *scissor_state,
                        const union pipe_color_union *color,
                        double depth,
@@ -539,7 +549,7 @@ void r300_decompress_zmask_locked(struct r300_context *r300)
     r300->context.set_framebuffer_state(&r300->context, &saved_fb);
     util_unreference_framebuffer_state(&saved_fb);
 
-    pipe_surface_reference(&r300->locked_zbuffer, NULL);
+    pipe_surface_reference(&r300->locked_zbuffer, NULL, &r300->context, r300_surface_destroy);
 }
 
 bool r300_is_blit_supported(enum pipe_format format)
@@ -702,7 +712,7 @@ static void r300_resource_copy_region(struct pipe_context *pipe,
                               false, false, 0, NULL);
     r300_blitter_end(r300);
 
-    pipe_surface_reference(&dst_view, NULL);
+    pipe_surface_reference(&dst_view, NULL, &r300->context, r300_surface_destroy);
     pipe_sampler_view_reference(&src_view, NULL);
 }
 
@@ -747,13 +757,13 @@ static void r300_simple_msaa_resolve(struct pipe_context *pipe,
 
     memset(&surf_tmpl, 0, sizeof(surf_tmpl));
     surf_tmpl.format = format;
-    srcsurf = r300_surface(pipe->create_surface(pipe, src, &surf_tmpl));
+    srcsurf = r300_surface(r300_create_surface(pipe, src, &surf_tmpl));
 
     surf_tmpl.format = format;
     surf_tmpl.level = dst_level;
     surf_tmpl.first_layer =
     surf_tmpl.last_layer = dst_layer;
-    dstsurf = r300_surface(pipe->create_surface(pipe, dst, &surf_tmpl));
+    dstsurf = r300_surface(r300_create_surface(pipe, dst, &surf_tmpl));
 
     /* Enable AA resolve. */
     aa->dest = dstsurf;
@@ -770,8 +780,8 @@ static void r300_simple_msaa_resolve(struct pipe_context *pipe,
     r300->aa_state.size = 4;
     r300_mark_atom_dirty(r300, &r300->aa_state);
 
-    pipe_surface_reference((struct pipe_surface**)&srcsurf, NULL);
-    pipe_surface_reference((struct pipe_surface**)&dstsurf, NULL);
+    r300_surface_destroy(pipe, &srcsurf->base);
+    r300_surface_destroy(pipe, &dstsurf->base);
 }
 
 static void r300_msaa_resolve(struct pipe_context *pipe,

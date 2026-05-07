@@ -357,8 +357,20 @@
    DRI_CONF_OPT_B(fake_sparse, def, \
                   "Advertise support for sparse binding of textures regardless of real support")
 
+#define DRI_CONF_INTEL_BINDING_TABLE_BLOCK_SIZE(def,min,max) \
+   DRI_CONF_OPT_I(intel_binding_table_block_size, def, min, max, \
+                  "Intel binding table block allocation size (3DSTATE_BINDING_TABLE_POOL_ALLOC)")
+
 #define DRI_CONFIG_INTEL_TBIMR(def) \
    DRI_CONF_OPT_B(intel_tbimr, def, "Enable TBIMR tiled rendering")
+
+#define DRI_CONFIG_INTEL_FORCE_COMPUTE_SURFACE_PREFETCH(def) \
+   DRI_CONF_OPT_B(intel_force_compute_surface_prefetch, def, \
+                  "Enable binding table surface prefteching for compute shaders")
+
+#define DRI_CONFIG_INTEL_FORCE_SAMPLER_PREFETCH(def) \
+   DRI_CONF_OPT_B(intel_force_sampler_prefetch, def, \
+                  "Enable binding table sampler prefteching")
 
 #define DRI_CONFIG_INTEL_VF_DISTRIBUTION(def) \
    DRI_CONF_OPT_B(intel_vf_distribution, def, "Enable geometry distribution")
@@ -372,6 +384,10 @@
 #define DRI_CONF_INTEL_ENABLE_WA_14018912822(def) \
    DRI_CONF_OPT_B(intel_enable_wa_14018912822, def, \
                   "Intel workaround for using zero blend constants")
+
+#define DRI_CONF_INTEL_ENABLE_WA_14024015672_MSAA(def) \
+   DRI_CONF_OPT_B(intel_enable_wa_14024015672_msaa, def, \
+                  "Intel workaround for RHWO MSAA")
 
 #define DRI_CONF_INTEL_SAMPLER_ROUTE_TO_LSC(def) \
    DRI_CONF_OPT_B(intel_sampler_route_to_lsc, def, \
@@ -584,6 +600,10 @@
    DRI_CONF_OPT_I(wgl_swap_interval, def, 1, 4, \
                   "Override default swap interval")
 
+#define DRI_CONF_WGL_REQUIRE_GDI_COMPAT(def) \
+   DRI_CONF_OPT_B(wgl_require_gdi_compat, def, \
+                  "Require all pixel formats to have PFD_SUPPORT_GDI flag")
+
 /**
  * \brief virgl specific configuration options
  */
@@ -667,6 +687,14 @@
 #define DRI_CONF_TU_ENABLE_SOFTFLOAT32(def) \
    DRI_CONF_OPT_B(tu_enable_softfloat32, def, \
                   "Enable softfloat emulation for float32 denormals")
+
+#define DRI_CONF_TU_EMULATE_ALPHA_TO_COVERAGE(def) \
+   DRI_CONF_OPT_B(tu_emulate_alpha_to_coverage, def, \
+                  "Enable emulation of alpha-to-coverage")
+
+#define DRI_CONF_TU_AUTOTUNE_ALGORITHM() \
+   DRI_CONF_OPT_S_NODEF(tu_autotune_algorithm, \
+                        "Set the preferred autotune algorithm")
 
 /**
  * \brief Honeykrisp specific configuration options
@@ -762,10 +790,6 @@
 #define DRI_CONF_RADV_DISABLE_SINKING_LOAD_INPUT_FS(def) \
    DRI_CONF_OPT_B(radv_disable_sinking_load_input_fs, def, \
                   "Disable sinking load inputs for fragment shaders")
-
-#define DRI_CONF_RADV_DISABLE_DEPTH_STORAGE(def) \
-  DRI_CONF_OPT_B(radv_disable_depth_storage, def, \
-                 "Hides support for storage access to depth formats")
 
 #define DRI_CONF_RADV_FLUSH_BEFORE_QUERY_COPY(def) \
   DRI_CONF_OPT_B( \
@@ -917,6 +941,10 @@
 #define DRI_CONF_ANV_EXTERNAL_MEMORY_IMPLICIT_SYNC(def) \
    DRI_CONF_OPT_B(anv_external_memory_implicit_sync, def, "Implicit sync on external BOs")
 
+#define DRI_CONF_ANV_STATE_CACHE_PERF_FIX(def) \
+   DRI_CONF_OPT_B(anv_state_cache_perf_fix, def, \
+                  "Whether COMMON_SLICE_CHICKEN3 bit13 should be programmed to enable BTP+BTI RCC keying")
+
 #define DRI_CONF_ANV_COMPRESSION_CONTROL_ENABLED(def) \
    DRI_CONF_OPT_B(compression_control_enabled, def, "Enable VK_EXT_image_compression_control support")
 
@@ -944,6 +972,10 @@
    DRI_CONF_OPT_B(anv_disable_drm_ccs_modifiers, def, \
                   "Disable DRM CCS modifier usage")
 
+#define DRI_CONF_ANV_DISABLE_LINK_TIME_OPTIMIZATION(def) \
+   DRI_CONF_OPT_B(anv_disable_link_time_optimization, def, \
+                  "Disable linking of graphics pipeline shaders")
+
 #define DRI_CONF_ANV_BARRIER_POST_UNTYPED_CLEAR_SHADER(def) \
    DRI_CONF_OPT_B(anv_barrier_post_untyped_clear_shader, def, \
                   "Insert pipeline barriers post clearing shader on untyped data")
@@ -951,6 +983,10 @@
 #define DRI_CONF_ANV_BARRIER_POST_TYPED_CLEAR_SHADER(def) \
    DRI_CONF_OPT_B(anv_barrier_post_typed_clear_shader, def, \
                   "Insert pipeline barriers post clearing shader on typed data")
+
+#define DRI_CONF_ANV_ENABLE_OPT_DIVERGENT_ATOMICS(def) \
+   DRI_CONF_OPT_I(anv_enable_opt_divergent_atomics, def, 0, 3,\
+                  "Enable fusion of divergent atomics (see brw_divergent_atomics_flags)")
 
 #define DRI_CONF_ANV_BRW_DISABLE_SUBGROUP_SIZE_CONTROL(def) \
    DRI_CONF_OPT_B(anv_brw_disable_subgroup_size_control, def, \
@@ -976,5 +1012,11 @@
 
 #define DRI_CONF_DZN_DISABLE(def) \
    DRI_CONF_OPT_B(dzn_disable, def, "Fail instance creation")
+
+/**
+ * \brief NVK specific configuration options
+ */
+
+ #define DRI_CONF_NVK_APP_LAYER() DRI_CONF_OPT_S_NODEF(nvk_app_layer, "Select an application layer.")
 
 #endif

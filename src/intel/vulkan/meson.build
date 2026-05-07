@@ -24,6 +24,7 @@ anv_entrypoints = custom_target(
     '--device-prefix', 'gfx125',
     '--device-prefix', 'gfx20',
     '--device-prefix', 'gfx30',
+    '--device-prefix', 'gfx35',
     '--device-prefix', 'anv_doom64',
     '--device-prefix', 'anv_furmark',
     '--device-prefix', 'anv_hitman3',
@@ -108,7 +109,7 @@ if with_intel_vk_rt
   )
 endif
 
-foreach _gfx_ver : ['90', '110', '120', '125', '200', '300']
+foreach _gfx_ver : ['90', '110', '120', '125', '200', '300', '350']
   libanv_per_hw_ver_libs += static_library(
     'anv_per_hw_ver@0@'.format(_gfx_ver),
     [anv_per_hw_ver_files, anv_entrypoints[0]] + bvh_spv,
@@ -182,6 +183,7 @@ libanv_files = files(
   'anv_nir_lower_ubo_loads.c',
   'anv_nir_lower_resource_intel.c',
   'anv_nir_lower_unaligned_dispatch.c',
+  'anv_nir_push_constants_analysis.c',
   'anv_nir_push_descriptor_analysis.c',
   'anv_perf.c',
   'anv_physical_device.c',
@@ -275,7 +277,8 @@ libvulkan_intel = shared_library(
     idep_nir, idep_genxml, idep_vulkan_util, idep_vulkan_wsi,
     idep_vulkan_runtime, idep_mesautil, idep_xmlconfig,
     idep_intel_driver_ds, idep_intel_dev, idep_intel_blorp,
-    idep_intel_compiler_brw, idep_libvulkan_intel_decoder
+    idep_intel_compiler_brw, idep_libvulkan_intel_decoder,
+    idep_intel_compiler_jay,
   ],
   c_args : anv_flags,
   gnu_symbol_visibility : 'hidden',
@@ -313,7 +316,7 @@ if with_tests
       dep_thread, dep_dl, dep_m, anv_deps,
       idep_nir, idep_vulkan_util, idep_vulkan_wsi, idep_vulkan_runtime,
       idep_mesautil, idep_intel_dev, idep_intel_blorp,
-      idep_intel_compiler_brw, idep_libvulkan_intel_decoder,
+      idep_intel_compiler_brw, idep_intel_compiler_jay, idep_libvulkan_intel_decoder,
     ],
     c_args : anv_flags,
     gnu_symbol_visibility : 'hidden',

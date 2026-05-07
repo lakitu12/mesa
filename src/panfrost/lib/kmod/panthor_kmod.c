@@ -247,7 +247,7 @@ panthor_kmod_dev_create(int fd, uint32_t flags, drmVersionPtr version,
    }
 
    /* Map the LATEST_FLUSH_ID register at device creation time. */
-   if (version->version_major > 1 || version->version_minor >= 10) {
+   if (version->version_major > 1 || version->version_minor >= 5) {
       struct drm_panthor_set_user_mmio_offset user_mmio_offset = {
          .offset = DRM_PANTHOR_USER_MMIO_OFFSET,
       };
@@ -423,8 +423,7 @@ panthor_kmod_bo_free(struct pan_kmod_bo *bo)
 }
 
 static struct pan_kmod_bo *
-panthor_kmod_bo_import(struct pan_kmod_dev *dev, uint32_t handle, uint64_t size,
-                       uint32_t flags)
+panthor_kmod_bo_import(struct pan_kmod_dev *dev, uint32_t handle, uint64_t size)
 {
    int ret;
    struct panthor_kmod_bo *panthor_bo =
@@ -434,6 +433,7 @@ panthor_kmod_bo_import(struct pan_kmod_dev *dev, uint32_t handle, uint64_t size,
       return NULL;
    }
 
+   uint32_t flags = PAN_KMOD_BO_FLAG_IMPORTED;
    if (pan_kmod_driver_version_at_least(&dev->driver, 1, 7)) {
       struct drm_panthor_bo_query_info args = {
          .handle = handle,
@@ -466,8 +466,7 @@ panthor_kmod_bo_import(struct pan_kmod_dev *dev, uint32_t handle, uint64_t size,
       goto err_free_bo;
    }
 
-   pan_kmod_bo_init(&panthor_bo->base, dev, NULL, size,
-                    flags | PAN_KMOD_BO_FLAG_IMPORTED, handle);
+   pan_kmod_bo_init(&panthor_bo->base, dev, NULL, size, flags, handle);
    return &panthor_bo->base;
 
 err_free_bo:
@@ -1043,8 +1042,8 @@ panthor_kmod_vm_bind(struct pan_kmod_vm *vm, enum pan_kmod_vm_op_mode mode,
       vm_orig_sync_point = vm_new_sync_point = panthor_kmod_vm_sync_lock(vm);
 
    for (uint32_t i = 0; i < op_count; i++) {
-      uint32_t op_sync_cnt = ops[i].syncs.count;
       uint64_t signal_vm_point = 0;
+      uint32_t op_sync_cnt = 0;
 
       if (async && track_activity) {
          signal_vm_point = ++vm_new_sync_point;
