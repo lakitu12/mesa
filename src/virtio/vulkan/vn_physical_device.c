@@ -2016,6 +2016,23 @@ vn_GetPhysicalDeviceProperties2(VkPhysicalDevice physicalDevice,
 
    vk_common_GetPhysicalDeviceProperties2(physicalDevice, pProperties);
 
+   /* The venus protocol only carries VkPhysicalDeviceProperties2 itself, so
+    * extension property structs come back uninitialised.  zink picks its
+    * Vulkan device by matching VkPhysicalDeviceDrmPropertiesEXT against the
+    * DRM node it opened (the guest's virtio-gpu node, 226:0 / 226:128) and
+    * otherwise bails out with "ZINK: failed to choose pdev".
+    */
+   VkPhysicalDeviceDrmPropertiesEXT *drm_props =
+      vk_find_struct(pProperties->pNext, PHYSICAL_DEVICE_DRM_PROPERTIES_EXT);
+   if (drm_props && !drm_props->hasRender) {
+      drm_props->hasPrimary = VK_TRUE;
+      drm_props->primaryMajor = 226;
+      drm_props->primaryMinor = 0;
+      drm_props->hasRender = VK_TRUE;
+      drm_props->renderMajor = 226;
+      drm_props->renderMinor = 128;
+   }
+
    /* Properly fill maint7 layered api properties. */
    if (!layered_props_list)
       return;
