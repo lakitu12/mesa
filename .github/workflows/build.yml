@@ -86,6 +86,7 @@ jobs:
                   -Dshared-llvm=enabled \
                   -Dplatforms=x11,wayland \
                   -Dgallium-drivers=llvmpipe,softpipe,virgl,zink \
+                  -Dvulkan-drivers=swrast,intel,panfrost,freedreno,asahi,virtio \
                   -Dgallium-rusticl=true \
                   -Dglvnd=enabled \
                   -Dxmlconfig=disabled
