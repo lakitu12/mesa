@@ -1,0 +1,123 @@
+name: Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Branch or tag'
+        required: true
+      draft_release:
+        description: 'Draft a new release'
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  debian-testing:
+    runs-on: ubuntu-24.04-arm
+    container:
+      image: debian:testing-slim
+      options: --privileged --user root
+
+    steps:
+      - name: Install dependencies
+        run: |
+          sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/debian.sources
+          apt update
+          apt build-dep -y mesa
+          apt install -y git ccache libxfixes-dev libarchive-dev
+          
+      - name: Update root certificates
+        run: |
+          apt update
+          apt install -y ca-certificates
+          update-ca-certificates
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: /root/.ccache
+          key: ccache-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            ccache-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Configure ccache
+        run: |
+          export CCACHE_DIR=/root/.ccache
+          ccache --max-size=2G
+          ccache --show-config
+          ccache --zero-stats
+          ccache --show-stats
+
+      - name: Clone repository
+        run: |
+          cd ~
+          git config --global user.email "actions@github.com"
+          git config --global user.name "GitHub Actions"
+          git clone -b ${{ github.event.inputs.tag }} --depth 1 ${{ github.server_url }}/${{ github.repository }}.git
+
+      - name: Set release name suffix
+        shell: bash
+        run: |
+          cd ~/mesa
+          version=$(grep -v '^[[:space:]]*$' VERSION | head -n1)
+          build_date=$(TZ=Asia/Shanghai date +%Y%m%d)
+          echo "MESA_RELEASE_NAME_SUFFIX=${version}-${build_date}_debian_testing_arm64" >> "$GITHUB_ENV"
+
+      - name: Build Mesa
+        shell: bash
+        run: |
+          export CCACHE_DIR=/root/.ccache
+          echo "Building Mesa..."
+          cd ~/mesa
+          meson setup build/ \
+                  --prefix=/usr \
+                  -Dgbm=enabled \
+                  -Dopengl=true \
+                  -Degl=enabled \
+                  -Degl-native-platform=x11 \
+                  -Dgles1=disabled \
+                  -Dgles2=enabled \
+                  -Dglx=dri \
+                  -Dllvm=enabled \
+                  -Dshared-llvm=enabled \
+                  -Dplatforms=x11,wayland \
+                  -Dgallium-drivers=llvmpipe,softpipe,virgl,zink \
+                  -Dgallium-rusticl=true \
+                  -Dglvnd=enabled \
+                  -Dxmlconfig=disabled
+          ninja -C build/
+          echo "Mesa build completed successfully!"
+
+      - name: Save ccache
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: /root/.ccache
+          key: ccache-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Package Mesa
+        shell: bash
+        run: |
+          echo "Packaging Mesa..."
+          cd ~/mesa
+          mkdir /tmp/mesa-install-tmp
+          DESTDIR=/tmp/mesa-install-tmp meson install -C build/
+          tar -zcvf mesa_${MESA_RELEASE_NAME_SUFFIX}.tar.gz -C /tmp/mesa-install-tmp .
+          rm -rf /tmp/mesa-install-tmp
+          echo "Calculating sha256 checksums..."
+          find . -maxdepth 1 \( -name "*.tar.gz" \) -type f -printf "%P\0" | xargs -0 sha256sum | sort -k2 > sha256sums.txt
+          cat sha256sums.txt && echo
+          echo "Packaging completed successfully!"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mesa_${{ env.MESA_RELEASE_NAME_SUFFIX }}
+          path: |
+            ~/mesa/*.tar.gz
+            ~/mesa/sha256sums.txt
+          retention-days: 90
