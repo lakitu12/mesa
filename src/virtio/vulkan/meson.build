@@ -123,7 +123,7 @@ vn_link_args = [
 vn_libs = []
 
 if not with_platform_windows
-  libvn_files += files('vn_renderer_vtest.c')
+  libvn_files += files('vn_renderer_vtest.c', 'vn_renderer_vsock.c')
 endif
 
 if system_has_kms_drm

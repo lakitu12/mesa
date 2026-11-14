@@ -89,6 +89,56 @@ struct vn_ring_submission {
    } indirect;
 };
 
+/*
+ * Copy-based renderers keep a private copy of the ring shmem.  These two
+ * helpers push client updates over the transport and pull renderer updates
+ * back.  For shared-memory backends both callbacks are NULL and the helpers
+ * are no-ops.
+ */
+static void
+vn_ring_flush_to_renderer(struct vn_ring *ring, uint32_t start, uint32_t end)
+{
+   struct vn_renderer *renderer = ring->instance->renderer;
+   if (!renderer->shmem_ops.flush)
+      return;
+
+   const uint8_t *base = ring->shmem->mmap_ptr;
+   const size_t buffer_offset = (const uint8_t *)ring->shared.buffer - base;
+   const uint32_t size = end - start;
+
+   if (size) {
+      const uint32_t offset = start & ring->buffer_mask;
+      const uint32_t first = MIN2(size, ring->buffer_size - offset);
+      vn_renderer_shmem_flush(renderer, ring->shmem,
+                              buffer_offset + offset, first);
+      if (first < size) {
+         vn_renderer_shmem_flush(renderer, ring->shmem, buffer_offset,
+                                 size - first);
+      }
+   }
+
+   /* tail must become visible after the command bytes */
+   vn_renderer_shmem_flush(renderer, ring->shmem,
+                           (const uint8_t *)ring->shared.tail - base,
+                           sizeof(*ring->shared.tail));
+}
+
+static void
+vn_ring_sync_from_renderer(struct vn_ring *ring)
+{
+   struct vn_renderer *renderer = ring->instance->renderer;
+   if (!renderer->shmem_ops.invalidate)
+      return;
+
+   const uint8_t *base = ring->shmem->mmap_ptr;
+   vn_renderer_shmem_invalidate(renderer, ring->shmem,
+                                (const uint8_t *)ring->shared.head - base,
+                                sizeof(*ring->shared.head));
+   vn_renderer_shmem_invalidate(renderer, ring->shmem,
+                                (const uint8_t *)ring->shared.status - base,
+                                sizeof(*ring->shared.status));
+}
+
 static uint32_t
 vn_ring_load_head(const struct vn_ring *ring)
 {
@@ -125,6 +175,14 @@ vn_ring_unset_status_bits(struct vn_ring *ring, uint32_t mask)
 {
    atomic_fetch_and_explicit(ring->shared.status, ~mask,
                              memory_order_seq_cst);
+
+   struct vn_renderer *renderer = ring->instance->renderer;
+   if (renderer->shmem_ops.flush) {
+      const uint8_t *base = ring->shmem->mmap_ptr;
+      vn_renderer_shmem_flush(renderer, ring->shmem,
+                              (const uint8_t *)ring->shared.status - base,
+                              sizeof(*ring->shared.status));
+   }
 }
 
 static void
@@ -201,6 +259,10 @@ vn_ring_wait_seqno(struct vn_ring *ring, uint32_t seqno)
          vn_relax_fini(&relax_state);
          return;
       }
+      /* copy-based renderers only advance the local view of head when we
+       * ask for it
+       */
+      vn_ring_sync_from_renderer(ring);
       vn_relax(&relax_state);
    } while (true);
 }
@@ -244,6 +306,7 @@ vn_ring_wait_space(struct vn_ring *ring, uint32_t size)
       struct vn_relax_state relax_state =
          vn_relax_init(ring->instance, VN_RELAX_REASON_RING_SPACE);
       do {
+         vn_ring_sync_from_renderer(ring);
          vn_relax(&relax_state);
          if (vn_ring_has_space(ring, size, &head)) {
             vn_relax_fini(&relax_state);
@@ -455,6 +518,9 @@ vn_ring_submit_internal(struct vn_ring *ring,
    /* avoid -Wmaybe-unitialized */
    uint32_t cur_seqno = 0;
 
+   /* first byte written by this submission, for copy-based transports */
+   const uint32_t start = ring->cur;
+
    for (uint32_t i = 0; i < cs->buffer_count; i++) {
       const struct vn_cs_encoder_buffer *buf = &cs->buffers[i];
       cur_seqno = vn_ring_wait_space(ring, buf->committed_size);
@@ -462,6 +528,8 @@ vn_ring_submit_internal(struct vn_ring *ring,
    }
 
    vn_ring_store_tail(ring);
+   vn_ring_flush_to_renderer(ring, start, ring->cur);
+   vn_ring_sync_from_renderer(ring);
    const VkRingStatusFlagsMESA status = vn_ring_load_status(ring);
    if (status & VK_RING_STATUS_FATAL_BIT_MESA) {
       vn_log(NULL, "vn_ring_submit abort on fatal");
@@ -750,6 +818,11 @@ vn_ring_submit_command(struct vn_ring *ring,
          submit->reply =
             VN_CS_DECODER_INITIALIZER(reply_ptr, submit->reply_size);
          vn_ring_wait_seqno(ring, submit->ring_seqno);
+
+         /* copy-based renderers write the reply into their own copy */
+         vn_renderer_shmem_invalidate(ring->instance->renderer,
+                                      submit->reply_shmem, reply_offset,
+                                      submit->reply_size);
       } else {
          vn_renderer_shmem_unref(ring->instance->renderer,
                                  submit->reply_shmem);

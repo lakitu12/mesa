@@ -133,6 +133,26 @@ struct vn_renderer_shmem_ops {
                                        size_t size);
    void (*destroy)(struct vn_renderer *renderer,
                    struct vn_renderer_shmem *shmem);
+
+   /*
+    * Optional.  Shared-memory backends (virtgpu, vtest) map the same pages on
+    * both sides, so their updates are visible without any explicit action and
+    * these callbacks stay NULL.
+    *
+    * A copy-based backend keeps a private buffer on each side and must
+    * translate updates explicitly.  flush() pushes client-side updates over
+    * the wire; invalidate() pulls renderer-side updates back.  Both are only
+    * needed by the ring shmem (command stream, head/tail/status) and by reply
+    * shmems (data written by the renderer).
+    */
+   void (*flush)(struct vn_renderer *renderer,
+                 struct vn_renderer_shmem *shmem,
+                 size_t offset,
+                 size_t size);
+   void (*invalidate)(struct vn_renderer *renderer,
+                      struct vn_renderer_shmem *shmem,
+                      size_t offset,
+                      size_t size);
 };
 
 struct vn_renderer_bo_ops {
@@ -225,13 +245,30 @@ vn_renderer_create_vtest(struct vn_instance *instance,
                          const VkAllocationCallbacks *alloc,
                          struct vn_renderer **renderer);
 
+/*
+ * Copy-based venus transport.  The renderer runs in another VM (or another
+ * process) and shares nothing: resource contents are transferred with
+ * explicit writes/reads over a stream socket (AF_UNIX or AF_VSOCK).
+ *
+ * Only tried when VENUS_COPY_SOCKET (an AF_UNIX path) or VENUS_COPY_VSOCK
+ * (a "cid:port" pair) is set; otherwise it fails immediately.
+ */
+VkResult
+vn_renderer_create_vsock(struct vn_instance *instance,
+                         const VkAllocationCallbacks *alloc,
+                         struct vn_renderer **renderer);
+
 static inline VkResult
 vn_renderer_create(struct vn_instance *instance,
                    const VkAllocationCallbacks *alloc,
                    struct vn_renderer **renderer)
 {
+   VkResult result =
+      vn_renderer_create_vsock(instance, alloc, renderer);
+   if (result == VK_SUCCESS)
+      return result;
+
 #ifdef HAVE_LIBDRM
-   VkResult result;
    if (VN_DEBUG(VTEST)) {
       result = vn_renderer_create_vtest(instance, alloc, renderer);
       if (result != VK_SUCCESS)
@@ -298,6 +335,28 @@ vn_renderer_shmem_unref(struct vn_renderer *renderer,
 {
    if (vn_refcount_dec(&shmem->refcount))
       renderer->shmem_ops.destroy(renderer, shmem);
+}
+
+/* push client-side updates to a copy-based renderer */
+static inline void
+vn_renderer_shmem_flush(struct vn_renderer *renderer,
+                        struct vn_renderer_shmem *shmem,
+                        size_t offset,
+                        size_t size)
+{
+   if (renderer->shmem_ops.flush)
+      renderer->shmem_ops.flush(renderer, shmem, offset, size);
+}
+
+/* pull renderer-side updates from a copy-based renderer */
+static inline void
+vn_renderer_shmem_invalidate(struct vn_renderer *renderer,
+                             struct vn_renderer_shmem *shmem,
+                             size_t offset,
+                             size_t size)
+{
+   if (renderer->shmem_ops.invalidate)
+      renderer->shmem_ops.invalidate(renderer, shmem, offset, size);
 }
 
 static inline VkResult
