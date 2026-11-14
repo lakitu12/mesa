@@ -718,7 +718,14 @@ vn_ring_submit_locked(struct vn_ring *ring,
    uint32_t seqno;
    const bool notify =
       vn_ring_submit_internal(ring, submit.submit, submit.cs, &seqno);
-   if (notify) {
+   /*
+    * Copy-based renderers set shmem_ops.flush.  Their renderer side cannot see
+    * the tail change on its own and parks the ring thread on a condition
+    * variable once it has gone idle, so every submission has to wake it up:
+    * relying on the IDLE status bit alone races with the ring thread going to
+    * sleep right after the client wrote the command bytes.
+    */
+   if (notify || ring->instance->renderer->shmem_ops.flush) {
       uint32_t notify_ring_data[8];
       struct vn_cs_encoder local_enc = VN_CS_ENCODER_INITIALIZER_LOCAL(
          notify_ring_data, sizeof(notify_ring_data));
