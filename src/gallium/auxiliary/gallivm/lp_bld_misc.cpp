@@ -41,6 +41,8 @@
 
 
 #include <stddef.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include <llvm/Config/llvm-config.h>
 #include <llvm-c/Core.h>
@@ -388,6 +390,31 @@ lp_build_fill_mattrs(std::vector<std::string> &MAttrs)
    }
 #endif
 
+#if DETECT_ARCH_AARCH64
+   /*
+    * llvmpipe never uses SVE/SVE2. Disable them unconditionally.
+    *
+    * llvmpipe otherwise inherits SVE from -mcpu: recent cores (Cortex-X925 and
+    * friends) list SVE2 in their default feature set, while the MAttrs built
+    * above come from /proc/cpuinfo and can only disable a feature that the
+    * kernel advertises as present-but-off. A kernel that masks SVE out of
+    * HWCAP while still reporting an SVE-capable MIDR therefore leaves SVE
+    * enabled, the JIT emits e.g. `index z1.s, #0, #1`, and the process dies
+    * with SIGILL. GenieZone on MTK behaves exactly like that.
+    *
+    * These run after every -mcpu derived default, so they win regardless of
+    * the detected CPU name. Nothing in llvmpipe needs wider-than-NEON
+    * vectors, and the code emitted without SVE is portable to any ARMv8/ARMv9
+    * core.
+    */
+   MAttrs.push_back("-sve");
+   MAttrs.push_back("-sve2");
+   MAttrs.push_back("-sve2-aes");
+   MAttrs.push_back("-sve2-bitperm");
+   MAttrs.push_back("-sve2-sha3");
+   MAttrs.push_back("-sve2-sm4");
+#endif
+
 #if DETECT_ARCH_PPC
    MAttrs.push_back(util_get_cpu_caps()->has_altivec ? "+altivec" : "-altivec");
    /*
@@ -445,6 +472,23 @@ lp_build_fill_mattrs(std::vector<std::string> &MAttrs)
    MAttrs.push_back("-lasx");
 #endif
 #endif
+
+   /*
+    * Allow appending MAttrs from the environment, to test a feature toggle
+    * without rebuilding: GALLIVM_EXTRA_MATTRS="+sve,+sve2".
+    */
+   const char *env_extra_mattrs = getenv("GALLIVM_EXTRA_MATTRS");
+   if (env_extra_mattrs != NULL && env_extra_mattrs[0] != '\0') {
+      char *dup = strdup(env_extra_mattrs);
+      if (dup != NULL) {
+         char *state = NULL;
+         for (char *token = strtok_r(dup, ",", &state); token != NULL;
+              token = strtok_r(NULL, ",", &state)) {
+            MAttrs.push_back(token);
+         }
+         free(dup);
+      }
+   }
 }
 
 void
