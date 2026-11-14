@@ -585,14 +585,10 @@ vsock_bo_map(struct vn_renderer *renderer,
       }
       bo->base.mmap_ptr = ptr;
 
-      /* the renderer has its own copy; make sure it is initialized before
-       * the client starts writing (the client may rely on zero-filled
-       * memory)
+      /* The renderer keeps its own copy.  Its contents are undefined until
+       * the client uploads (Vulkan does not require newly allocated memory to
+       * be zeroed), so there is nothing to transfer here.
        */
-      mtx_lock(&vsock->sock_mutex);
-      vsock_vcmd_resource_write_locked(vsock, bo->base.res_id, 0, ptr,
-                                       bo->base.mmap_size);
-      mtx_unlock(&vsock->sock_mutex);
    }
 
    /* everything the client writes until the next submit must be uploaded,
@@ -920,13 +916,30 @@ vsock_wait(struct vn_renderer *renderer, const struct vn_renderer_wait *wait)
    const uint32_t timeout_ms =
       poll_timeout < 0 ? UINT32_MAX : (uint32_t)poll_timeout;
 
-   mtx_lock(&vsock->sock_mutex);
-   const VkResult result = vsock_vcmd_sync_wait_locked(
-      vsock, flags, timeout_ms, wait->syncs, wait->sync_values,
-      wait->sync_count);
-   mtx_unlock(&vsock->sock_mutex);
+   /*
+    * The renderer blocks in SYNC_WAIT until one of the syncs is signalled,
+    * and the transport is strictly request/response: while it waits, no other
+    * thread can talk to it.  Bound each round so a multi-threaded client does
+    * not stall behind an unrelated wait, and re-issue until the deadline.
+    */
+   const uint32_t round_ms = MIN2(timeout_ms, 10u);
+   uint64_t elapsed_ms = 0;
 
-   return result;
+   for (;;) {
+      mtx_lock(&vsock->sock_mutex);
+      const VkResult result = vsock_vcmd_sync_wait_locked(
+         vsock, flags, round_ms, wait->syncs, wait->sync_values,
+         wait->sync_count);
+      mtx_unlock(&vsock->sock_mutex);
+
+      if (result != VK_TIMEOUT)
+         return result;
+      if (timeout_ms != UINT32_MAX) {
+         elapsed_ms += round_ms;
+         if (elapsed_ms >= timeout_ms)
+            return VK_TIMEOUT;
+      }
+   }
 }
 
 static void
