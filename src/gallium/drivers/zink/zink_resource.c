@@ -1705,6 +1705,15 @@ create_image(struct zink_screen *screen, struct zink_resource_object *obj,
       if (num_dmabuf_planes > 3)
          obj->modifier_aspect |= VK_IMAGE_ASPECT_MEMORY_PLANE_3_BIT_EXT;
       assert(num_dmabuf_planes <= 4);
+   } else if (modifiers_count && !winsys_modifier &&
+              ici.tiling == VK_IMAGE_TILING_LINEAR && ici_modifiers &&
+              ici_modifiers[0] == DRM_FORMAT_MOD_LINEAR) {
+      /* add_resource_bind() requested LINEAR but negotiate_image_config()
+       * fell back to a plain LINEAR image (the host forces external images
+       * linear as well).  Report the modifier the caller asked for so the
+       * bind assertion and the layout checks see a consistent answer.
+       */
+      obj->modifier = DRM_FORMAT_MOD_LINEAR;
    }
 
    alloc_info->need_dedicated = get_image_memory_requirement(screen, obj, num_planes, &reqs);
