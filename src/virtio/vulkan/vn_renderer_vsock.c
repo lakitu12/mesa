@@ -596,6 +596,18 @@ vsock_bo_map(struct vn_renderer *renderer,
     */
    mtx_lock(&vsock->sock_mutex);
    if (!bo->is_dirty) {
+      /* The renderer's memory is reported as coherent (that is what the host
+       * driver advertises), but the guest-side mapping is a private copy:
+       * host writes only arrive on an explicit invalidate.  A client that
+       * trusts VK_MEMORY_PROPERTY_HOST_COHERENT_BIT therefore maps, reads,
+       * and gets stale bytes.  Pull the renderer contents here so mapping
+       * behaves the way the client expects.  A dirty buffer still holds
+       * client writes that were not uploaded yet, so leave it alone.
+       */
+      if (bo->base.mmap_ptr && bo->base.mmap_size)
+         vsock_vcmd_resource_read_locked(vsock, bo->base.res_id, 0,
+                                         bo->base.mmap_ptr,
+                                         bo->base.mmap_size);
       list_addtail(&bo->dirty_head, &vsock->dirty_bos);
       bo->is_dirty = true;
    }
