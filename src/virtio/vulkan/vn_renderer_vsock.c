@@ -1073,11 +1073,72 @@ vsock_connect_vsock(struct vsock *vsock, const char *addr)
 #endif
 }
 
+static int
+vsock_listen_vsock(struct vsock *vsock, const char *port_str);
+
+static int
+vsock_listen_vsock(struct vsock *vsock, const char *port_str)
+{
+#ifdef __linux__
+   struct sockaddr_vm vm;
+   int lfd, cfd;
+   uint32_t port = 0;
+
+   if (sscanf(port_str, "%u", &port) != 1 || !port) {
+      vn_log(vsock->instance, "invalid VENUS_COPY_VSOCK_LISTEN '%s'", port_str);
+      return -1;
+   }
+
+   lfd = socket(AF_VSOCK, SOCK_STREAM | SOCK_CLOEXEC, 0);
+   if (lfd < 0) {
+      vn_log(vsock->instance, "failed to create a vsock socket: %s",
+             strerror(errno));
+      return -1;
+   }
+
+   memset(&vm, 0, sizeof(vm));
+   vm.svm_family = AF_VSOCK;
+   vm.svm_cid = VMADDR_CID_ANY;
+   vm.svm_port = port;
+
+   if (bind(lfd, (struct sockaddr *)&vm, sizeof(vm)) == -1) {
+      vn_log(vsock->instance, "failed to bind vsock port %u: %s", port,
+             strerror(errno));
+      close(lfd);
+      return -1;
+   }
+
+   if (listen(lfd, 1) == -1) {
+      vn_log(vsock->instance, "failed to listen on vsock port %u: %s", port,
+             strerror(errno));
+      close(lfd);
+      return -1;
+   }
+
+   vn_log(vsock->instance, "waiting for renderer connection on vsock port %u",
+          port);
+   cfd = accept(lfd, NULL, NULL);
+   if (cfd < 0) {
+      vn_log(vsock->instance, "accept on vsock port %u failed: %s", port,
+             strerror(errno));
+      close(lfd);
+      return -1;
+   }
+   close(lfd);
+   vn_log(vsock->instance, "renderer connected on fd %d", cfd);
+   return cfd;
+#else
+   vn_log(vsock->instance, "vsock is not supported on this platform");
+   return -1;
+#endif
+}
+
 static VkResult
 vsock_init(struct vsock *vsock)
 {
    const char *socket_path = os_get_option("VENUS_COPY_SOCKET");
    const char *vsock_addr = os_get_option("VENUS_COPY_VSOCK");
+   const char *listen_port = os_get_option("VENUS_COPY_VSOCK_LISTEN");
 
    util_sparse_array_init(&vsock->shmem_array, sizeof(struct vsock_shmem),
                           1024);
@@ -1086,14 +1147,15 @@ vsock_init(struct vsock *vsock)
    mtx_init(&vsock->sock_mutex, mtx_plain);
    list_inithead(&vsock->dirty_bos);
 
-   if (!socket_path && !vsock_addr) {
-      vn_log(vsock->instance, "neither VENUS_COPY_SOCKET nor "
-             "VENUS_COPY_VSOCK is set");
+   if (!socket_path && !vsock_addr && !listen_port) {
+      vn_log(vsock->instance, "neither VENUS_COPY_SOCKET, VENUS_COPY_VSOCK "
+             "nor VENUS_COPY_VSOCK_LISTEN is set");
       return VK_ERROR_INITIALIZATION_FAILED;
    }
 
-   vsock->sock_fd = socket_path ? vsock_connect_unix(vsock, socket_path)
-                                : vsock_connect_vsock(vsock, vsock_addr);
+   vsock->sock_fd = listen_port ? vsock_listen_vsock(vsock, listen_port)
+                     : socket_path ? vsock_connect_unix(vsock, socket_path)
+                                   : vsock_connect_vsock(vsock, vsock_addr);
    if (vsock->sock_fd < 0)
       return VK_ERROR_INITIALIZATION_FAILED;
 
