@@ -891,6 +891,10 @@ init_ici(struct zink_screen *screen, VkImageCreateInfo *ici, const struct pipe_r
       ici->tiling = VK_IMAGE_TILING_LINEAR;
    else
       ici->tiling = VK_IMAGE_TILING_OPTIMAL;
+   if (getenv("ZINK_MODIFIER_DEBUG"))
+      fprintf(stderr, "zink: init_ici bind=0x%x mods=%u ext=%d -> tiling=%d\n",
+              bind, modifiers_count,
+              screen->info.have_EXT_image_drm_format_modifier, (int)ici->tiling);
    /* XXX: does this have perf implications anywhere? hopefully not */
    if (ici->samples == VK_SAMPLE_COUNT_1_BIT &&
       screen->info.have_EXT_multisampled_render_to_single_sampled &&
@@ -1618,6 +1622,9 @@ create_image(struct zink_screen *screen, struct zink_resource_object *obj,
    init_ici(screen, &ici, templ, templ->bind, ici_modifier_count);
 
    bool success = false;
+   if (getenv("ZINK_MODIFIER_DEBUG"))
+      fprintf(stderr, "zink: create_image mods=%u tiling=%d\n",
+              ici_modifier_count, (int)ici.tiling);
    VkImageFormatListCreateInfo *fmtlist = (formats[0] && formats[1]) ? &format_list : NULL;
    uint64_t mod = negotiate_image_config(screen, &ici, templ, templ->bind, ici_modifier_count, ici_modifiers, fmtlist, &success);
    if (ici.format == VK_FORMAT_A8_UNORM_KHR && !success) {
@@ -2018,6 +2025,10 @@ add_resource_bind(struct zink_context *ctx, struct zink_resource *res, unsigned 
    res->base.b.bind |= bind;
    struct zink_resource_object *old_obj = res->obj;
    ASSERTED uint64_t mod = DRM_FORMAT_MOD_INVALID;
+   if (getenv("ZINK_MODIFIER_DEBUG"))
+      fprintf(stderr, "zink: add_resource_bind bind=0x%x have_ext=%d mods=%d is_buffer=%d\n",
+              bind, screen->info.have_EXT_image_drm_format_modifier,
+              res->modifiers_count, res->obj->is_buffer);
    if (bind & ZINK_BIND_DMABUF && !res->modifiers_count && !res->obj->is_buffer && screen->info.have_EXT_image_drm_format_modifier) {
       res->modifiers_count = 1;
       res->modifiers = malloc(res->modifiers_count * sizeof(uint64_t));
@@ -2034,6 +2045,9 @@ add_resource_bind(struct zink_context *ctx, struct zink_resource *res, unsigned 
       res->base.b.bind &= ~bind;
       return false;
    }
+   if (getenv("ZINK_MODIFIER_DEBUG"))
+      fprintf(stderr, "zink: add_resource_bind -> mod=0x%llx new_obj->modifier=0x%llx\n",
+              (unsigned long long)mod, (unsigned long long)new_obj->modifier);
    assert(mod == DRM_FORMAT_MOD_INVALID || new_obj->modifier == DRM_FORMAT_MOD_LINEAR);
    struct zink_resource staging = *res;
    staging.obj = old_obj;
